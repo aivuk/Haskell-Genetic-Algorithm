@@ -13,6 +13,7 @@ import Data.Array
 import Control.Applicative
 import Control.Monad.State
 import Data.IORef
+import Text.Printf
 import qualified Data.Vector.Unboxed as V
 
 -- Binary Tree representing a program
@@ -98,10 +99,10 @@ createRandomTree level binArr unArr energy_f = do
 
 -- Generate a Random Tree of maximum depth 'level'
 
-genRandTree :: Int           -- Maximem depth of the new tree
-            -> BinArray a    -- Array of Binary functions
-            -> UnArray a     -- Array of Unary functions
-            -> RandomTree a  -- Generated Random Tree
+genRandTree :: Int           -- ^ Maximem depth of the new tree
+            -> BinArray a    -- ^ Array of Binary functions
+            -> UnArray a     -- ^ Array of Unary functions
+            -> RandomTree a  -- ^ Generated Random Tree
 
 genRandTree 0 _ _ = return V
 genRandTree level binArr unArr = do
@@ -120,9 +121,9 @@ genRandTree level binArr unArr = do
 
 -- Number of nodes in a given depth of a Tree
 
-nodesInLevel :: Tree a  -- Tree to be analized
-             -> Int     -- Depth
-             -> Int     -- Number of nodes in one specific depth
+nodesInLevel :: Tree a  -- ^ Tree to be analized
+             -> Int     -- ^ Depth
+             -> Int     -- ^ Number of nodes in one specific depth
 
 nodesInLevel tree level = nl tree 1 
   where 
@@ -177,10 +178,10 @@ insertTreeInNodeLevel insTree tree level node =
 
 -- Apply a function returning a Tree in a given Node
 
-applyInNode :: (Tree a -> Tree a)  -- Function that modifies a tree
-            -> Tree a              -- Tree to be modified
-            -> Int                 -- Node number to apply the function
-            -> Tree a              -- Modified Tree
+applyInNode :: (Tree a -> Tree a)  -- ^ Function that modifies a tree
+            -> Tree a              -- ^ Tree to be modified
+            -> Int                 -- ^ Node number to apply the function
+            -> Tree a              -- ^ Modified Tree
 
 applyInNode f tree node = appN tree 0
   where 
@@ -196,10 +197,10 @@ applyInNode f tree node = appN tree 0
 
 -- Insert a Tree in a given node
 
-insertTreeInNode :: Tree a  -- Tree to be inserted
-                 -> Tree a  -- Tree that will be modified
-                 -> Int     -- Number of node that will have the insertion
-                 -> Tree a  -- Modified Tree
+insertTreeInNode :: Tree a  -- ^ Tree to be inserted
+                 -> Tree a  -- ^ Tree that will be modified
+                 -> Int     -- ^ Number of node that will have the insertion
+                 -> Tree a  -- ^ Modified Tree
 
 insertTreeInNode itree tree node = applyInNode (const itree) tree node
 
@@ -241,11 +242,11 @@ energyF points grid f = quadratic_error/p + roughness/m
 
 -- Calculate a Monte Carlo step
 
-mcPass :: IORef (Double, Tree a)  -- A tree with his respective energy
-       -> BinArray a              -- Array of binary Functions
-       -> UnArray a               -- Array of Unary Functions
-       -> Double                  -- 1/T
-       -> EnergyFunction a        -- Calculates the energy of a Tree function
+mcPass :: IORef (Double, Tree a)  -- ^ A tree with his respective energy
+       -> BinArray a              -- ^ Array of binary Functions
+       -> UnArray a               -- ^ Array of Unary Functions
+       -> Double                  -- ^ 1/T
+       -> EnergyFunction a        -- ^ Calculate the energy of a Tree function
        -> (Int, Int) 
        -> StateT MTGen IO (Int, Int)
 
@@ -293,32 +294,29 @@ nMcSteps tr ba ua b ef n d_k_i = do
                            | otherwise = mcPass tr ba ua b ef (a, d_k)
     foldM mcPass' (0, 5) [1..n]
 
--- Convert a Tree to Graphviz DOT format (Ok, ugly code, just for tests)
+-- Convert a Tree to Graphviz DOT format
 
 printDot :: Tree a -> IO ()
 printDot tree = do
-    putStrLn "digraph test {\n\
-             \\tmargin = \"0\"\n\
-             \\tpage = \"0.0,0.0\"\n\
-             \\tsize = \"0.0,0.0\"\n\
-             \\trotate = \"0\"\n\
-             \\tratio = \"fill\"\n"
+    printf "digraph test {\n\
+           \\tmargin = \"0\"\n\
+           \\tpage = \"0.0,0.0\"\n\
+           \\tsize = \"0.0,0.0\"\n\
+           \\trotate = \"0\"\n\
+           \\tratio = \"fill\"\n"
     toDot tree 1
-    putStrLn "}"
-        where
-            toDot (Bin f l r) i = do 
-                putStrLn $ "\t" ++ (show i) ++ " [label = \"" ++ 
-                                                    (fst f) ++ "\"]" 
-                mapM_ (\x -> do 
-                    putStrLn $ "\t" ++ (show i) ++ " -> " ++ 
-                                (show x)) [i + 1, i + 1 + sizeTree l]
-                toDot l (i + 1)
-                toDot r (1 + i + sizeTree l)
-            toDot (Un f u) i = do 
-                    putStrLn $ "\t" ++ (show i) ++ " [label = \"" ++ 
-                                                        (fst f) ++ "\"]" 
-                    putStrLn $ "\t" ++ (show i) ++ " -> " ++ (show $ i + 1)
-                    toDot u (i + 1)
-            toDot V i = do putStrLn $ "\t" ++ (show i) ++ " [label = \"x\"]" 
+    printf "}"
+      where
+        toDot (Bin f l r) i = do 
+            printf "\t%d [level = \"%s\"]" i (fst f)
+            let st = sizeTree l
+            printf "\t %d -> %d\n\t %d -> %d\n" i (i + 1) i (i + 1 + st)
+            toDot l (i + 1)
+            toDot r (1 + i + st)
+        toDot (Un f u) i = do 
+                printf "\t%d [label = \"%d\"]\n" i (fst f)
+                printf "\t%d -> %d\n" i (i + 1)
+                toDot u (i + 1)
+        toDot V i = printf "\t%d [label = \"x\"]\n" i
 
 
