@@ -222,8 +222,8 @@ mutateTree tree binArr unArr d_k = do
         size = sizeTree tree
 
 -- Given a set of points and a grid, return the energy function of a program 'f'
+--   This energy if just for the points fitting problem
 
-{--
 energyF :: V.Vector (Double, Double) 
         -> V.Vector Double 
         -> (Double -> Double) 
@@ -235,10 +235,8 @@ energyF points grid f = quadratic_error/p + roughness/m
     m = fromIntegral $ V.length grid :: Double
     quadratic_error = V.foldl (\s (x,y) -> s + (y - f x)**2) 0 points
     g = (grid V.!)
-    gridDiff =  
-    roughness = V.foldl (\s x -> abs $ f (g $ x + 1) - f (g x)) 0 $ 
-                                                        V.enumFromStepN 1 1 (floor m - 1)
---}
+    roughness = V.foldl (\s x -> abs $ s + f (g $ x + 1) - f (g x)) 0 $
+                                           V.enumFromStepN 1 1 (floor m - 1)
 
 -- Calculate a Monte Carlo step
 
