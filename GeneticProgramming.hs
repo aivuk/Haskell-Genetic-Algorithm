@@ -8,12 +8,27 @@ module GeneticProgramming
     , printDot
     ) where
 
-import System.Random.Mersenne
-import Data.Array
-import Control.Applicative
-import Control.Monad.State
-import Data.IORef
-import Text.Printf
+import System.Random.Mersenne (MTGen, random)
+
+import Data.Array ( listArray
+                  , Array 
+                  , bounds
+                  , (!) )
+
+import Control.Applicative ( (<$>)
+                           , (<*>) )
+
+import Control.Monad.State ( StateT
+                           , get
+                           , lift )
+
+import Control.Monad (foldM)
+import Data.IORef ( newIORef
+                  , readIORef
+                  , writeIORef
+                  , IORef )
+
+import Text.Printf (printf)
 import qualified Data.Vector.Unboxed as V
 
 -- Binary Tree representing a program
