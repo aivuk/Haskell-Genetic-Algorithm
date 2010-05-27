@@ -123,16 +123,17 @@ genRandTree 0 _ _ = return V
 genRandTree level binArr unArr = do
     g <- get
     nodeType <- lift $ randNodeType g
-    case nodeType of BinT -> do
-                                binFunc <- lift $ randElem binArr g
-                                left <- genRandTree (level - 1) binArr unArr
-                                right <- genRandTree (level - 1) binArr unArr
-                                return $ Bin binFunc left right
-                     UnT  ->do
-                                unFunc <- lift $ randElem unArr g
-                                un <- genRandTree (level - 1) binArr unArr
-                                return $ Un unFunc un
-                     VT   -> do return V
+    case nodeType of 
+        BinT -> do
+            binFunc <- lift $ randElem binArr g
+            left <- genRandTree (level - 1) binArr unArr
+            right <- genRandTree (level - 1) binArr unArr
+            return $ Bin binFunc left right
+        UnT  ->do
+            unFunc <- lift $ randElem unArr g
+            un <- genRandTree (level - 1) binArr unArr
+            return $ Un unFunc un
+        VT   -> return V
 
 -- Number of nodes in a given depth of a Tree
 
@@ -143,9 +144,10 @@ nodesInLevel :: Tree a  -- ^ Tree to be analized
 nodesInLevel tree level = nl tree 1 
   where 
     nl t i | i < level = 
-                case t of Bin _ l r -> nl l (i + 1) + nl r (i + 1)
-                          Un _ u -> nl u (i + 1)
-                          V -> 0
+                case t of 
+                    Bin _ l r -> nl l (i + 1) + nl r (i + 1)
+                    Un _ u -> nl u (i + 1)
+                    V -> 0
            | i == level = 1
            | otherwise = error "Level must be bigger than 1"
 
@@ -171,11 +173,12 @@ applyInNodeLevel f tree level node = appNL tree 0 1
   where 
     appNL t ni li | li == level = f t
                   | otherwise = 
-            case t of Un uf u -> Un uf (appNL u ni (li + 1))
-                      V -> V
-                      Bin bf l r -> if (ni + nleft) > node
-                                      then Bin bf (appNL l ni $ li + 1) r
-                                      else Bin bf l (appNL r nleft $ li + 1)
+            case t of 
+                Un uf u -> Un uf (appNL u ni (li + 1))
+                V -> V
+                Bin bf l r -> if (ni + nleft) > node
+                                then Bin bf (appNL l ni $ li + 1) r
+                                else Bin bf l (appNL r nleft $ li + 1)
                             where 
                                 nleft = nodesInLevel l (level - li)
 
@@ -202,13 +205,14 @@ applyInNode f tree node = appN tree 0
   where 
     appN t ni | ni == node = f t
               | otherwise = 
-            case t of Un uf u -> Un uf (appN u $ ni + 1)
-                      V -> V
-                      Bin bf l r -> if (ni + nleft) >= node
-                                      then Bin bf (appN l $ ni + 1) r
-                                      else Bin bf l (appN r $ ni + nleft + 1)
-                                            where 
-                                                nleft = sizeTree l
+            case t of 
+                Un uf u -> Un uf (appN u $ ni + 1)
+                V -> V
+                Bin bf l r -> if (ni + nleft) >= node
+                                then Bin bf (appN l $ ni + 1) r
+                                else Bin bf l (appN r $ ni + nleft + 1)
+                                where 
+                                    nleft = sizeTree l
 
 -- Insert a Tree in a given node
 

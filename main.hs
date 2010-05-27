@@ -58,7 +58,7 @@ makeUnSnd vs sv = g
     g (Left v)  = Right $ vs v
     g (Right s) = Left  $ sv s
 
--- Vector Product
+-- Scalar Product
 
 v1 <*> v2 = V.sum $ V.zipWith (*) v1 v2
 
