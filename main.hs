@@ -3,6 +3,7 @@ module Main where
 import System.Random.Mersenne
 import Control.Monad.State
 import GeneticProgramming
+import Data.IORef
 import qualified Data.Vector.Unboxed as V
 
 type Vector = V.Vector Scalar
@@ -114,3 +115,15 @@ makePerceptron w b = f
         | otherwise        =  0
 
 perceptron = makePerceptron (V.fromList [1,2,3,4]) 0.3
+
+grid = V.fromList [1, 1.2 .. 8] :: V.Vector Double
+points = V.map (\x -> (x, x**2)) grid
+
+ef = energyF points grid
+
+main = do
+    g <- getStdGen
+    ts <- evalStateT (parallelMc 15 binArr unArr ef (10**(-4)) 100 30 10 5 1000) g
+    tree <- fmap (snd).readIORef.snd $ last ts
+    print $ map (\x -> (treeToFunc tree x, x**2)) [1,1.2 .. 8]
+

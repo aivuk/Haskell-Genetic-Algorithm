@@ -1,11 +1,21 @@
+{-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
+
 module GeneticProgramming 
     ( Tree
+    , TreeType (..)
     , NodeType
     -- Functions
     , listToArray
     , treeToFunc
     , mcPass 
     , printDot
+    , energyF
+    , nMcSteps
+    , parallelMc
+    , createRandomTree
+    , nodesInLevel
+    , applyInNodeLevel
+    , insertTreeInNodeLevel
     ) where
 
 import System.Random.Mersenne (MTGen, random)
@@ -45,9 +55,9 @@ data NodeType = BinT
 
 -- A Tree Associated with a specific set of binary and unary functions
 
-data TreeType a = T { tree :: Tree a, 
-                      binA :: BinArray a,
-                      unA :: UnArray a }
+data TreeType a = T { unTree :: Tree a, 
+                      unBinA :: BinArray a,
+                      unUnA :: UnArray a }
 
 -- Convert a Tree to a function
 
@@ -98,16 +108,15 @@ sizeTree (Bin _ l r) = 1 + sizeTree l + sizeTree r
 sizeTree (Un _ u) = 1 + sizeTree u
 sizeTree V = 1
 
--- Save Random Tree
+-- Save a new random tree
 
-createRandomTree :: Int 
-                 -> BinArray a 
-                 -> UnArray a 
-                 -> EnergyFunction a
-                 -> StateT MTGen IO (IORef (Double, Tree a))
+createRandomTree :: Int               -- ^ The maximum depth of the tree
+                 -> BinArray a        -- ^ Binary Functions of the tree
+                 -> UnArray a         -- ^ Unary Functions of the tree
+                 -> EnergyFunction a  -- ^ The energy function
+                 -> StateT MTGen IO (IORef (Double, Tree a))  
 
 createRandomTree level binArr unArr energy_f = do
-    g <- get
     randomTree <- genRandTree level binArr unArr
     let energy = energy_f (treeToFunc randomTree)
     lift $ newIORef (energy, randomTree)
@@ -255,7 +264,7 @@ energyF points grid f = quadratic_error/p + roughness/m
     quadratic_error = V.foldl (\s (x,y) -> s + (y - f x)**2) 0 points
     g = (grid V.!)
     roughness = V.foldl (\s x -> abs $ s + f (g $ x + 1) - f (g x)) 0 $
-                                           V.enumFromStepN 1 1 (floor m - 1)
+                                           V.enumFromStepN 1 1 ((floor m) - 2)
 
 -- Calculate a Monte Carlo step
 
@@ -304,12 +313,55 @@ nMcSteps :: IORef (Double, Tree a)
 
 nMcSteps tr ba ua b ef n d_k_i = do
     let mcPass' (a, d_k) i | i `mod` 10 == 0 = 
-                               if a == 0
-                                 then mcPass tr ba ua b ef (0, d_k_i + 1)
-                                 else  mcPass tr ba ua b ef (a, d_k)
-                           | a == 5 = mcPass tr ba ua b ef (0, d_k - 1)
+                               if a < 5
+                                 then mcPass tr ba ua b ef (0, d_k + 1)
+                                 else  mcPass tr ba ua b ef (0, d_k - 1)
                            | otherwise = mcPass tr ba ua b ef (a, d_k)
-    foldM mcPass' (0, 5) [1..n]
+    foldM mcPass' (0, d_k_i) [1..n]
+
+-- Parallel Tempering Monte Carlo 
+
+parallelMc :: Int               -- ^ The maximum size of a tree
+           -> BinArray a        -- ^ Binary Functions Array
+           -> UnArray a         -- ^ Unary Functions Array
+           -> EnergyFunction a  -- ^ The energy function
+           -> Double            -- ^ The minimum temperature
+           -> Double            -- ^ The maximum temperature
+           -> Double            -- ^ Number of 'beans' in the temperature
+           -> Int               -- ^ Number of MC steps before try 'PT'
+           -> Int               -- ^ Initial maximum size of a random branch
+           -> Int               -- ^ Number of PTMC steps
+           -> StateT MTGen IO [(Double, IORef (Double, Tree a))]
+
+parallelMc treeSize binArr unArr ef t_min t_max t_beans nMc d_k_i n = do 
+    let dt = (t_max - t_min)/t_beans 
+        initTree temp = do 
+            newTree <- createRandomTree treeSize binArr unArr ef
+            return (1/temp, newTree)
+    mc <- mapM initTree [t_min, t_min + dt .. t_max]
+    ptmc mc n
+    return mc
+  where
+    ptmc mc 0 = return ()
+    ptmc mc p = do 
+        mapM_ (\(b,t) -> nMcSteps t binArr unArr b ef nMc d_k_i) mc
+        mapM_ confExchange $ zip mc $ tail mc 
+        ptmc mc (p - 1)
+  
+    confExchange ((_, m1), (_, m2)) = do
+        (e1, _) <- lift $ readIORef m1
+        (e2, _) <- lift $ readIORef m2
+        if e1 < e2
+          then
+            lift $ swap m1 m2 
+          else
+            return ()
+
+    swap t1 t2 = do
+        t1' <- readIORef t1
+        t2' <- readIORef t2
+        writeIORef t1 t2'
+        writeIORef t2 t1'
 
 -- Convert a Tree to Graphviz DOT format
 
@@ -321,7 +373,7 @@ printDot tree = do
            \\tsize = \"0.0,0.0\"\n\
            \\trotate = \"0\"\n\
            \\tratio = \"fill\"\n"
-    toDot tree 1
+    toDot tree 1 
     printf "}"
       where
         toDot (Bin f l r) i = do 
