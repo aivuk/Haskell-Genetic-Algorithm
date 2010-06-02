@@ -32,7 +32,7 @@ import Control.Monad.State ( StateT
                            , get
                            , lift )
 
-import Control.Monad (foldM)
+import Control.Monad (foldM , when)
 import Data.IORef ( newIORef
                   , readIORef
                   , writeIORef
@@ -347,25 +347,22 @@ parallelMc treeSize binArr unArr ef t_min t_max nMc nSMc nPtmc d_k_i = do
             newTree <- createRandomTree treeSize binArr unArr ef
             return (temp, (temp - t_min)/(fromIntegral nMc), newTree)
     mc <- mapM initTree [t_max, t_max - dt .. t_min]
-    ptmc mc nMc
+    ptmc mc 0 nMc
   where
-    ptmc mc p 
-        | p < 0 = return mc
+    ptmc mc i p 
+        | i >= p = return mc
         | otherwise = do 
             let mcPart (t, dt, tree) = 
                     nMcSteps binArr unArr t dt ef nSMc d_k_i tree
             mapM_ mcPart mc
-            mapM_ confExchange $ zip mc $ tail mc 
-            ptmc mc (p - nSMc)
+            mapM_ (confExchange i) $ zip mc $ tail mc 
+            ptmc mc (i + nSMc) p
   
-    confExchange ((_, _, m1), (_, _, m2)) = do
+    confExchange i ((t1, dt1, m1), (t2, dt2, m2)) = do
+        let t' t dt = t - (fromIntegral $ i*nSMc)*dt
         (e1, _) <- lift $ readIORef m1
         (e2, _) <- lift $ readIORef m2
-        if e1 < e2
-          then
-            lift $ swap m1 m2 
-          else
-            return ()
+        when (((t' t1 dt1) - (t' t2 dt2))*(e1 - e2) > 0) (lift $ swap m1 m2)
 
     swap t1 t2 = do
         t1' <- readIORef t1

@@ -118,13 +118,16 @@ makePerceptron w b = f
 
 perceptron = makePerceptron (V.fromList [1,2,3,4]) 0.3
 
-grid = V.fromList [1, 1.2 .. 8] :: V.Vector Double
-points = V.map (\x -> (x, sin x)) grid
+grid = V.fromList [0, 0.2 .. 10] :: V.Vector Double
+points = V.map (\x -> (x, sin x + x*cos x)) grid
 
 ef = energyF points grid
 
 main = do
     g <- getStdGen
-    (_,_,ts) <- fmap unzip3 $ evalStateT (parallelMc 15 binArr unArr ef (10**(-4)) 100 (10^4) 10 30 5) g
-    mapM_ (\t -> readIORef t >>= (\s -> print s)) ts
+    (_,_,ts) <- fmap unzip3 $ evalStateT (parallelMc 15 binArr unArr ef (10**(-4)) 100 (10^5) 10 30 5) g
+    trees <- mapM readIORef ts 
+    let tmin = snd $ minimumBy (\x y -> compare (fst x) (fst y)) trees
+    mapM_ (\x -> printf "%f %f\n" x $ (treeToFunc tmin) x) [1, 1.2 .. 8]
+
 
