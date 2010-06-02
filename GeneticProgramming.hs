@@ -314,17 +314,13 @@ nMcSteps :: BinArray a
 
 nMcSteps ba ua t_i dt ef n d_k_i tr = do
     let mcPass' (a, d_k, t) i 
-            | i `mod` 10 == 0 = 
-                if a < 5
-                  then do
-                    (a', d_k') <- mcPass tr ba ua (1/t) ef (0, d_k + 1)
-                    return (a', d_k', t - dt)
-                  else  do
-                    (a', d_k') <- mcPass tr ba ua (1/t) ef (0, d_k - 1)
-                    return (a', d_k', t - dt)
+            | i `mod` 10 == 0 = do
+                ud_k <- return $ if a < 5 then d_k + 1 else d_k - 1
+                (a', d_k') <- mcPass tr ba ua (1/t) ef (0, ud_k)
+                return (a', d_k', t - dt)
             | otherwise = do
-                    (a', d_k') <- mcPass tr ba ua (1/t) ef (a, d_k)
-                    return (a', d_k', t - dt)
+                (a', d_k') <- mcPass tr ba ua (1/t) ef (a, d_k)
+                return (a', d_k', t - dt)
     foldM mcPass' (0, d_k_i, t_i) [1..n]
 
 -- Parallel Tempering Monte Carlo 
