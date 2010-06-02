@@ -302,22 +302,30 @@ mcPass treeRef binArr unArr beta energy_f (a, d_k) = do
 
 -- Calculate N MC steps
 
-nMcSteps :: IORef (Double, Tree a)
-         -> BinArray a 
+nMcSteps :: BinArray a 
          -> UnArray a
+         -> Double
          -> Double
          -> EnergyFunction a
          -> Int
          -> Int
-         -> StateT MTGen IO (Int, Int)
+         -> IORef (Double, Tree a)
+         -> StateT MTGen IO (Int, Int, Double)
 
-nMcSteps tr ba ua b ef n d_k_i = do
-    let mcPass' (a, d_k) i | i `mod` 10 == 0 = 
-                               if a < 5
-                                 then mcPass tr ba ua b ef (0, d_k + 1)
-                                 else  mcPass tr ba ua b ef (0, d_k - 1)
-                           | otherwise = mcPass tr ba ua b ef (a, d_k)
-    foldM mcPass' (0, d_k_i) [1..n]
+nMcSteps ba ua t_i dt ef n d_k_i tr = do
+    let mcPass' (a, d_k, t) i 
+            | i `mod` 10 == 0 = 
+                if a < 5
+                  then do
+                    (a', d_k') <- mcPass tr ba ua (1/t) ef (0, d_k + 1)
+                    return (a', d_k', t - dt)
+                  else  do
+                    (a', d_k') <- mcPass tr ba ua (1/t) ef (0, d_k - 1)
+                    return (a', d_k', t - dt)
+            | otherwise = do
+                    (a', d_k') <- mcPass tr ba ua (1/t) ef (a, d_k)
+                    return (a', d_k', t - dt)
+    foldM mcPass' (0, d_k_i, t_i) [1..n]
 
 -- Parallel Tempering Monte Carlo 
 
@@ -327,28 +335,30 @@ parallelMc :: Int               -- ^ The maximum size of a tree
            -> EnergyFunction a  -- ^ The energy function
            -> Double            -- ^ The minimum temperature
            -> Double            -- ^ The maximum temperature
-           -> Double            -- ^ Number of 'beans' in the temperature
-           -> Int               -- ^ Number of MC steps before try 'PT'
-           -> Int               -- ^ Initial maximum size of a random branch
+           -> Int               -- ^ Number of MC steps
+           -> Int               -- ^ Number of MC steps before try swap 
            -> Int               -- ^ Number of PTMC steps
-           -> StateT MTGen IO [(Double, IORef (Double, Tree a))]
+           -> Int               -- ^ Initial maximum size of a random branch
+           -> StateT MTGen IO [(Double, Double, IORef (Double, Tree a))]
 
-parallelMc treeSize binArr unArr ef t_min t_max t_beans nMc d_k_i n = do 
-    let dt = (t_max - t_min)/t_beans 
+parallelMc treeSize binArr unArr ef t_min t_max nMc nSMc nPtmc d_k_i = do 
+    let dt = (t_max - t_min)/(fromIntegral nPtmc)
         initTree temp = do 
             newTree <- createRandomTree treeSize binArr unArr ef
-            return (1/temp, newTree)
-    mc <- mapM initTree [t_min, t_min + dt .. t_max]
-    ptmc mc n
-    return mc
+            return (temp, (temp - t_min)/(fromIntegral nMc), newTree)
+    mc <- mapM initTree [t_max, t_max - dt .. t_min]
+    ptmc mc nMc
   where
-    ptmc mc 0 = return ()
-    ptmc mc p = do 
-        mapM_ (\(b,t) -> nMcSteps t binArr unArr b ef nMc d_k_i) mc
-        mapM_ confExchange $ zip mc $ tail mc 
-        ptmc mc (p - 1)
+    ptmc mc p 
+        | p < 0 = return mc
+        | otherwise = do 
+            let mcPart (t, dt, tree) = 
+                    nMcSteps binArr unArr t dt ef nSMc d_k_i tree
+            mapM_ mcPart mc
+            mapM_ confExchange $ zip mc $ tail mc 
+            ptmc mc (p - nSMc)
   
-    confExchange ((_, m1), (_, m2)) = do
+    confExchange ((_, _, m1), (_, _, m2)) = do
         (e1, _) <- lift $ readIORef m1
         (e2, _) <- lift $ readIORef m2
         if e1 < e2
