@@ -12,6 +12,36 @@ type Vector = V.Vector Scalar
 type Scalar = Double
 type VS = Either Vector Scalar
 
+binVVV :: [Vector -> Vector -> Vector]
+binVVV = [(<+>)] 
+
+binVVS :: [Vector -> Vector -> Scalar]
+binVVS = [(<*>)]
+
+binVSV :: [Vector -> Scalar -> Vector]
+binVSV = [(*<)] 
+
+binSVV :: [Scalar -> Vector -> Vector]
+binSVV = [(>*)]
+
+binSSS :: [Scalar -> Scalar -> Scalar]
+binSSS = [(*), (+)]
+
+binSSV = []
+binSVS = []
+binVSS = []
+
+unVV :: [Vector -> Vector]
+unVV = [((-1) >*)]
+
+unVS :: [Vector -> Scalar]
+unVS = [norm]
+
+unSS :: [Scalar -> Scalar]
+unSS = [psqr, plog, pexp]
+
+unSV = []
+
 -- Create binary functions on type Either
 
 makeBin :: (Vector -> Vector -> Vector)

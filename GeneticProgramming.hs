@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
+{-# OPTIONS_GHC -fno-warn-unused-do-bind -XGADTs #-}
 
 module GeneticProgramming 
     ( Tree
@@ -41,11 +41,25 @@ import Data.IORef ( newIORef
 import Text.Printf (printf)
 import qualified Data.Vector.Unboxed as V
 
--- Binary Tree representing a program
+-- Binary Tree representing a monomorphic program
 
 data Tree a = Bin (String, (a -> a -> a)) (Tree a) (Tree a)
             | Un (String, (a -> a)) (Tree a)
             | V
+
+-- Binary Tree representing a polymorphic program
+
+data PTree a b where
+    PBin :: (a' -> b' -> c) -> PTree a a' -> PTree a b' -> PTree a c
+    PUn  :: (a' -> b') -> PTree a a' -> PTree a b'
+    PV   :: (a -> b') -> PTree a b'
+
+-- Convert a Polymorphic Tree to a function
+
+ptreeToFunc :: PTree a b -> a -> b
+ptreeToFunc (PBin f l r) =  f <$> ptreeToFunc l <*> ptreeToFunc r
+ptreeToFunc (PUn f u) = f.(ptreeToFunc u)
+ptreeToFunc (PV f) = f
 
 -- Node Type
 
@@ -59,7 +73,7 @@ data TreeType a = T { unTree :: Tree a,
                       unBinA :: BinArray a,
                       unUnA :: UnArray a }
 
--- Convert a Tree to a function
+-- Convert a Monomorphic Tree to a function
 
 treeToFunc :: Tree a -> a -> a
 treeToFunc (Bin f l r) =  (snd f) <$> treeToFunc l <*> treeToFunc r
