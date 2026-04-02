@@ -139,5 +139,112 @@ randNodeType g = do
     i <- fmap (`mod` 3) (random g :: IO Int)
     return $ [BinT, UnT, VT] !! i
 
+------------------------------------------------------------------------
+-- Tree generation
+------------------------------------------------------------------------
+
+genPTree :: forall a b. (Typeable a, Typeable b)
+         => [TBin] -> [TUn] -> [TLeaf a]
+         -> Int -> MTGen -> IO (PTree a b)
+genPTree bins uns leaves depth g = do
+    let vl = mapMaybe (matchLeaf @a @b) leaves
+        vu = mapMaybe (matchUn   @b)    uns
+        vb = mapMaybe (matchBin  @b)    bins
+    nt <- if depth <= 0 then return VT else randNodeType g
+    case (nt, toArr vl, toArr vu, toArr vb) of
+        (VT,   Just al, _,       _      ) -> pickLeaf al
+        (UnT,  _,       Just au, _      ) -> pickUn   au
+        (BinT, _,       _,       Just ab) -> pickBin  ab
+        (_,    Just al, _,       _      ) -> pickLeaf al
+        _ -> error "genPTree: no leaf for this output type"
+  where
+    maybeConst :: IO (Maybe (PTree a b))
+    maybeConst = case eqT @b @Double of
+        Just Refl -> do
+            p <- (random g :: IO Double)
+            if p < 0.25
+                then do v   <- fmap (\r -> r * 4 - 2) (random g :: IO Double)
+                        ref <- newIORef v
+                        return (Just (PConst ref))
+                else return Nothing
+        Nothing -> return Nothing
+
+    pickLeaf al = do
+        mc <- maybeConst
+        case mc of
+            Just c  -> return c
+            Nothing -> do (name, f) <- randElem al g
+                          return (PV name f)
+
+    pickUn au = do
+        MatchedUn name (Proxy :: Proxy x) f <- randElem au g
+        sub <- genPTree @a @x bins uns leaves (depth - 1) g
+        return (PUn name f sub)
+
+    pickBin ab = do
+        MatchedBin name (Proxy :: Proxy x) (Proxy :: Proxy y) f <- randElem ab g
+        l <- genPTree @a @x bins uns leaves (depth - 1) g
+        r <- genPTree @a @y bins uns leaves (depth - 1) g
+        return (PBin name f l r)
+
+mutatePTree :: forall a b. (Typeable a, Typeable b)
+            => PTree a b
+            -> [TBin] -> [TUn] -> [TLeaf a]
+            -> Int -> MTGen -> IO (PTree a b)
+mutatePTree tree bins uns leaves maxDepth g = do
+    node <- fmap (`mod` sizeP tree) (random g :: IO Int)
+    go tree node
+  where
+    go :: forall c. Typeable c => PTree a c -> Int -> IO (PTree a c)
+    go _ 0 = genPTree @a @c bins uns leaves maxDepth g
+    go t@(PV _ _)    _ = return t
+    go t@(PConst _)  _ = return t
+    go (PUn name f sub) n =
+        PUn name f <$> go sub (n - 1)
+    go (PBin name f l r) n =
+        let sl = sizeP l
+        in if n - 1 < sl
+           then (\l' -> PBin name f l' r) <$> go l (n - 1)
+           else (\r' -> PBin name f l r') <$> go r (n - 1 - sl)
+
+------------------------------------------------------------------------
+-- Quaternion helper
+------------------------------------------------------------------------
+
+-- Quaternion exponential of a pure vector: exp_q(v) = cos(||v||) + sin(||v||)/||v|| * v
+-- Handles ||v|| -> 0 gracefully (returns identity).
+expQ :: Vec3 -> Quat
+expQ v =
+    let h = norm v
+    in if h < 1e-10
+       then Quaternion 1 (V3 0 0 0)
+       else Quaternion (cos h) ((sin h / h) *^ v)
+
+------------------------------------------------------------------------
+-- Mocap function pool
+------------------------------------------------------------------------
+
+mocapBins :: [TBin]
+mocapBins =
+    [ TBin "(*)"     ((*) :: Double -> Double -> Double)
+    , TBin "scale_v" ((*^) :: Double -> Vec3 -> Vec3)
+    , TBin "add_v"   ((+)  :: Vec3 -> Vec3 -> Vec3)
+    , TBin "q_mul"   ((*) :: Quat -> Quat -> Quat)
+    ]
+
+mocapUns :: [TUn]
+mocapUns =
+    [ TUn "exp_q"  (expQ   :: Vec3   -> Quat)
+    , TUn "neg_v"  (negate :: Vec3   -> Vec3)
+    , TUn "norm_v" (norm   :: Vec3   -> Double)
+    , TUn "neg"    (negate :: Double -> Double)
+    ]
+
+mocapLeaves :: [TLeaf MocapInput]
+mocapLeaves =
+    [ TLeaf "omega" (miOmega :: MocapInput -> Vec3)
+    , TLeaf "dt"    (miDt    :: MocapInput -> Double)
+    ]
+
 main :: IO ()
 main = putStrLn "main-mocap: scaffold ok"
