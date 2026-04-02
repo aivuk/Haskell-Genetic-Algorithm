@@ -155,7 +155,10 @@ genPTree bins uns leaves depth g = do
         (VT,   Just al, _,       _      ) -> pickLeaf al
         (UnT,  _,       Just au, _      ) -> pickUn   au
         (BinT, _,       _,       Just ab) -> pickBin  ab
+        -- Fallbacks: when forced node type has no candidates, try others
         (_,    Just al, _,       _      ) -> pickLeaf al
+        (_,    _,       Just au, _      ) -> pickUn   au
+        (_,    _,       _,       Just ab) -> pickBin  ab
         _ -> error "genPTree: no leaf for this output type"
   where
     maybeConst :: IO (Maybe (PTree a b))
@@ -464,4 +467,34 @@ parallelTempering bins uns leaves energy cfg = do
     loop 1
 
 main :: IO ()
-main = putStrLn "main-mocap: scaffold ok"
+main = do
+    let csvPath = "data/mocap_sample.csv"
+    putStrLn $ "Loading " ++ csvPath ++ " ..."
+    pts <- loadMocapCSV csvPath
+    printf "Loaded %d transition rows\n" (V.length pts)
+
+    let ef tree = optimizeConsts (energyMocap pts) tree >> energyMocap pts tree
+        cfg = defaultSearchConfig
+
+    printf "Starting search: %d chains, max %d rounds, depth %d\n"
+        (length (scTemps cfg)) (scMaxRounds cfg) (scDepth cfg)
+    printf "Stopping when: energy < %s, wall time < %s s\n"
+        (show (scTargetEnergy cfg)) (show (scMaxWallSeconds cfg))
+
+    (e, best, reason) <- parallelTempering @MocapInput @Quat
+                             mocapBins mocapUns mocapLeaves ef cfg
+
+    putStrLn $ "\nStopped: " ++ reason
+    printf "Best energy (1 - |q_hat . q|^2): %.8f\n" e
+    printf "Best tree: %s\n" (show best)
+
+    putStrLn "\nSample predictions (first 5 rows):"
+    printf "%-12s %-12s %-12s  dq_target_w  dq_found_w\n"
+        ("omega_x"::String) ("omega_y"::String) ("omega_z"::String)
+    V.mapM_ (\(w@(V3 ox oy oz), d, q_t) -> do
+        q_h <- evalTree best (MocapInput w d)
+        let Quaternion tw _ = q_t
+            Quaternion hw _ = q_h
+        printf "%-12.4f %-12.4f %-12.4f  %-12.6f  %-12.6f\n"
+            ox oy oz tw hw
+        ) (V.take 5 pts)
