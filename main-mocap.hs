@@ -312,5 +312,156 @@ energyMocap pts tree = do
         return (1.0 - d_val * d_val)
     return $ sum errs / fromIntegral (length errs)
 
+------------------------------------------------------------------------
+-- SearchConfig
+------------------------------------------------------------------------
+
+data SearchConfig = SearchConfig
+    { scMaxWallSeconds  :: Maybe Int
+    , scTargetEnergy    :: Maybe Double
+    , scMaxRounds       :: Int
+    , scStepsPerSwap    :: Int
+    , scLogEvery        :: Int
+    , scCheckpointFile  :: Maybe FilePath
+    , scCheckpointEvery :: Int
+    , scTemps           :: [Double]
+    , scDepth           :: Int
+    }
+
+defaultSearchConfig :: SearchConfig
+defaultSearchConfig = SearchConfig
+    { scMaxWallSeconds  = Just 3600
+    , scTargetEnergy    = Just 1e-4
+    , scMaxRounds       = 5000
+    , scStepsPerSwap    = 200
+    , scLogEvery        = 10
+    , scCheckpointFile  = Just "checkpoint.csv"
+    , scCheckpointEvery = 50
+    , scTemps           = logTemps 12 0.001 10.0
+    , scDepth           = 5
+    }
+
+logTemps :: Int -> Double -> Double -> [Double]
+logTemps n tMin tMax =
+    [ tMin * (tMax / tMin) ** (fromIntegral i / fromIntegral (n - 1))
+    | i <- [0 .. n - 1] ]
+
+------------------------------------------------------------------------
+-- Format elapsed time as HH:MM:SS
+------------------------------------------------------------------------
+
+formatDiff :: NominalDiffTime -> String
+formatDiff d =
+    let total = floor d :: Int
+        h     = total `div` 3600
+        m     = (total `mod` 3600) `div` 60
+        s     = total `mod` 60
+    in printf "%02d:%02d:%02d" h m s
+
+------------------------------------------------------------------------
+-- MC step (single chain)
+------------------------------------------------------------------------
+
+mcStep :: forall a b. (Typeable a, Typeable b)
+       => [TBin] -> [TUn] -> [TLeaf a]
+       -> (PTree a b -> IO Double)
+       -> Int -> Double
+       -> IORef (Double, PTree a b)
+       -> MTGen -> IO ()
+mcStep bins uns leaves energy depth temp ref g = do
+    (e, t) <- readIORef ref
+    t'     <- mutatePTree t bins uns leaves depth g
+    e'     <- energy t'
+    p      <- (random g :: IO Double)
+    when (p < exp (-(e' - e) / temp)) $
+        writeIORef ref (e', t')
+
+------------------------------------------------------------------------
+-- Parallel tempering with SearchConfig
+------------------------------------------------------------------------
+
+parallelTempering :: forall a b. (Typeable a, Typeable b)
+                  => [TBin] -> [TUn] -> [TLeaf a]
+                  -> (PTree a b -> IO Double)
+                  -> SearchConfig
+                  -> IO (Double, PTree a b, String)
+parallelTempering bins uns leaves energy cfg = do
+    let temps = scTemps cfg
+        n     = length temps
+
+    chainGs <- replicateM n getStdGen
+
+    chains <- forM (zip temps chainGs) $ \(_, g') -> do
+        t <- genPTree @a @b bins uns leaves (scDepth cfg) g'
+        e <- energy t
+        newIORef (e, t)
+
+    startTime <- getCurrentTime
+
+    case scCheckpointFile cfg of
+        Just fp -> writeFile fp "round,energy,tree\n"
+        Nothing -> return ()
+
+    let loop round = do
+          now <- getCurrentTime
+          let elapsed = diffUTCTime now startTime
+
+          let timeLimitHit = case scMaxWallSeconds cfg of
+                Just s  -> elapsed >= fromIntegral s
+                Nothing -> False
+
+          vals <- mapM readIORef chains
+          let (bestE, bestT) = minimumBy (comparing fst) vals
+
+          let energyTargetHit = case scTargetEnergy cfg of
+                Just tgt -> bestE <= tgt
+                Nothing  -> False
+
+          if | round > scMaxRounds cfg ->
+                 return (bestE, bestT, "max rounds reached")
+             | timeLimitHit ->
+                 return (bestE, bestT, "wall time limit reached")
+             | energyTargetHit ->
+                 return (bestE, bestT, "target energy reached")
+             | otherwise -> do
+
+                 mapConcurrently
+                     (\(temp, ref, g') ->
+                         forM_ [1 .. scStepsPerSwap cfg :: Int] $ \_ ->
+                             mcStep bins uns leaves energy (scDepth cfg) temp ref g')
+                     (zip3 temps chains chainGs)
+
+                 forM_ (zip3 temps (tail temps) (zip chains (tail chains))) $
+                     \(t1, t2, (ref1, ref2)) -> do
+                         (e1, _) <- readIORef ref1
+                         (e2, _) <- readIORef ref2
+                         g0      <- getStdGen
+                         p       <- (random g0 :: IO Double)
+                         when (p < exp ((1/t1 - 1/t2) * (e1 - e2))) $ do
+                             v1 <- readIORef ref1
+                             v2 <- readIORef ref2
+                             writeIORef ref1 v2
+                             writeIORef ref2 v1
+
+                 when (round `mod` scLogEvery cfg == 0) $ do
+                     vals' <- mapM readIORef chains
+                     let (be, _) = minimumBy (comparing fst) vals'
+                     printf "[round %d/%d | %s elapsed] best=%.6f\n"
+                         round (scMaxRounds cfg) (formatDiff elapsed) be
+
+                 when (round `mod` scCheckpointEvery cfg == 0) $
+                     case scCheckpointFile cfg of
+                         Just fp -> do
+                             vals' <- mapM readIORef chains
+                             let (be, bt) = minimumBy (comparing fst) vals'
+                             appendFile fp $
+                                 show round ++ "," ++ show be ++
+                                 ",\"" ++ show bt ++ "\"\n"
+                         Nothing -> return ()
+
+                 loop (round + 1)
+
+    loop 1
+
 main :: IO ()
 main = putStrLn "main-mocap: scaffold ok"
