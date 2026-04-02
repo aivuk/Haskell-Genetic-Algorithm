@@ -246,5 +246,71 @@ mocapLeaves =
     , TLeaf "dt"    (miDt    :: MocapInput -> Double)
     ]
 
+------------------------------------------------------------------------
+-- CSV loader
+------------------------------------------------------------------------
+
+splitOn :: Char -> String -> [String]
+splitOn delim = foldr f [""]
+  where
+    f c (x:xs) | c == delim = "" : x : xs
+               | otherwise  = (c:x) : xs
+    f _ [] = []
+
+-- Load mocap CSV with columns:
+-- omega_x, omega_y, omega_z, dt, dq_w, dq_x, dq_y, dq_z
+loadMocapCSV :: FilePath -> IO (V.Vector (Vec3, Double, Quat))
+loadMocapCSV path = do
+    content <- readFile path
+    let ls = drop 1 (lines content)   -- skip header
+        parseLine l =
+            let cols = splitOn ',' l
+            in case map (read :: String -> Double) cols of
+                [ox, oy, oz, dt, dw, dx, dy, dz] ->
+                    Just (V3 ox oy oz, dt, Quaternion dw (V3 dx dy dz))
+                _ -> Nothing
+    return $ V.fromList $ mapMaybe parseLine ls
+
+------------------------------------------------------------------------
+-- Constant optimisation (golden section, coordinate descent)
+------------------------------------------------------------------------
+
+goldenSearchIO :: (Double -> IO Double) -> Double -> Double -> Int -> IO Double
+goldenSearchIO f lo hi n = go lo hi n
+  where
+    phi = (sqrt 5 - 1) / 2
+    go a b 0 = return ((a + b) / 2)
+    go a b k = do
+        let c = b - phi * (b - a)
+            d = a + phi * (b - a)
+        fc <- f c
+        fd <- f d
+        if fc < fd then go a d (k - 1)
+                   else go c b (k - 1)
+
+optimizeConsts :: (PTree MocapInput Quat -> IO Double)
+               -> PTree MocapInput Quat -> IO ()
+optimizeConsts energy tree = do
+    let refs = collectConsts tree
+    forM_ [1 .. 3 :: Int] $ \_ ->
+        forM_ refs $ \ref -> do
+            v0 <- readIORef ref
+            let radius = max 1.0 (abs v0 * 2)
+                obj v  = writeIORef ref v >> energy tree
+            vOpt <- goldenSearchIO obj (v0 - radius) (v0 + radius) 40
+            writeIORef ref vOpt
+
+------------------------------------------------------------------------
+-- Energy function
+------------------------------------------------------------------------
+
+energyMocap :: V.Vector (Vec3, Double, Quat) -> PTree MocapInput Quat -> IO Double
+energyMocap pts tree = do
+    errs <- forM (V.toList pts) $ \(w, d, q_target) -> do
+        q_hat <- evalTree tree (MocapInput w d)
+        let d_val = q_hat `dot` q_target
+        return (1.0 - d_val * d_val)
+    return $ sum errs / fromIntegral (length errs)
+
 main :: IO ()
 main = putStrLn "main-mocap: scaffold ok"
