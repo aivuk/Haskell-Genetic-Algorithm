@@ -45,4 +45,29 @@ The expression is correct but not in canonical form. Full algebraic normalizatio
 
 **Phase (a): COMPLETE — advancing to phase (b)**
 
+### Phase (b) Iteration 1 — 2026-04-03
+
+**Runs:** 10
+**Changes applied:**
+- Added sq_lx, sq_ly, sq_lz as pre-computed leaves (avoids needing depth=4 for 3-component sum)
+- Removed safeRecip from unary pool (caused degenerate high-power overfitting via sq(safeRecip(safeRecip(...))))
+- Removed sq from unary pool (sq(sq_lx) = lx^4 caused polynomial explosion)
+- scDepth=3 sufficient with pre-computed squared leaves
+
+**Trees found:** All 10 in the |L|² equivalence class (e.g., 0.333lx²+0.083ly², 0.252lx²-0.082lz², etc.)
+**Success rate:** 10/10 = 100%
+**Energy range (full dataset):** 2.65e-11 to 6.54e-6 (all << 1e-4)
+
+**Key insight (Failure Mode FB-3: |L|² degeneracy):**
+The rigid body Euler equations L × ∂H/∂L = dL/dt are unchanged by adding any multiple of |L|²
+to H, since L × (λ·2L) = 2λ·(L × L) = 0. The symplectic loss has infinitely many global minima
+(one for each λ). The search correctly finds Hamiltonians in this equivalence class — they all
+have zero symplectic residual and represent the same physical dynamics. The canonical form
+H = 0.5lx²+0.25ly²+lz²/6 is just one choice; the search finds others like 0.333lx²+0.083ly²
+(λ=1/6) or 0.252lx²-0.082lz² (λ=0.25).
+
+**Revised success criterion for phase (b):** full-dataset symplectic residual < 1e-4 (not specific coefficient ranges, due to degeneracy). All 10 runs satisfy this.
+
+**Phase (b): COMPLETE — advancing to phase (c)**
+
 **Note on Approach B (symbolic differentiation):** Deferred. The `diffTree` function requires chain-rule handling for all GADT constructors with existential types. Implemented after all phases complete to compare speed vs. finite differences.

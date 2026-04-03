@@ -575,16 +575,17 @@ rigidBodyBins =
 
 rigidBodyUns :: [TUn]
 rigidBodyUns =
-  [ TUn "sq"        ((\x -> x*x) :: Double -> Double)
-  , TUn "neg"       (negate      :: Double -> Double)
-  , TUn "safeRecip" (safeRecip   :: Double -> Double)
+  [ TUn "neg" (negate :: Double -> Double)
   ]
 
 rigidBodyLeaves :: [TLeaf RigidBodyInput]
 rigidBodyLeaves =
-  [ TLeaf "lx" (\inp -> let V3 x _ _ = rbL inp in x)
-  , TLeaf "ly" (\inp -> let V3 _ y _ = rbL inp in y)
-  , TLeaf "lz" (\inp -> let V3 _ _ z = rbL inp in z)
+  [ TLeaf "lx"    (\inp -> let V3 x _ _ = rbL inp in x)
+  , TLeaf "ly"    (\inp -> let V3 _ y _ = rbL inp in y)
+  , TLeaf "lz"    (\inp -> let V3 _ _ z = rbL inp in z)
+  , TLeaf "sq_lx" (\inp -> let V3 x _ _ = rbL inp in x*x)
+  , TLeaf "sq_ly" (\inp -> let V3 _ y _ = rbL inp in y*y)
+  , TLeaf "sq_lz" (\inp -> let V3 _ _ z = rbL inp in z*z)
   ]
 
 -- Symplectic loss for rigid body: ||dL/dt - L x grad_L H||^2
@@ -617,7 +618,7 @@ runRigidBody = do
   putStrLn $ "Loaded " ++ show (length pts) ++ " data points"
   let searchPts = take 300 pts
       cfg = defaultSearchConfig
-        { scMaxWallSeconds = Just 300
+        { scMaxWallSeconds = Just 270
         , scDepth          = 3
         , scTargetEnergy   = Just 1e-4
         , scCheckpointFile = Just "checkpoint_rigidbody.csv"

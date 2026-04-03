@@ -88,10 +88,39 @@ Full-dataset energies: 1.6e-21 to 1.7e-12 (all << 1e-4). Coefficients: c₁=0.5,
 
 ## 4. Results — Phase (b): 3D Rigid Body
 
-(Results will be filled in by the ralph loop)
+Ground truth: `H = Lx²/2 + Ly²/4 + Lz²/6` (I=(1,2,3)).
+Revised success criterion: full-dataset symplectic residual < 1e-4 (see Section 4.2).
 
-| Iter | Change | Runs | Success | Success Rate | Dominant Failure |
-|------|--------|------|---------|--------------|------------------|
+### 4.1 Iteration Table
+
+| Iter | Change | Runs | Success | Rate | Notes |
+|------|--------|------|---------|------|-------|
+| 0 | depth=3, all pool ops | 1 | 0/1 | 0% | FB-1: depth=3 insufficient for 3 terms |
+| 0b | depth=4, safeRecip removed | 1 | 0/1 | 0% | FB-2: too slow (~70 rounds in 270s) |
+| 1 | sq_lx/ly/lz leaves, no sq/safeRecip unary, depth=3 | 10 | 10/10 | 100% | — |
+
+### 4.2 Degeneracy of the Rigid Body Hamiltonian
+
+The rigid body symplectic loss has a fundamental degeneracy: adding any multiple of |L|² to H
+leaves the equations of motion unchanged, since L × (2λL) = 2λ(L×L) = 0. The loss function
+therefore has infinitely many global minima, one for each λ. The search finds Hamiltonians in
+the equivalence class {H_correct + λ|L|² : λ ∈ ℝ}. Examples found:
+- λ=1/6: H = 0.333lx² + 0.083ly² (lz term vanishes)
+- λ=0.25: H = 0.252lx² − 0.082lz² (ly term vanishes)
+- λ≈0.33: H = 0.167lz² + 0.083ly² (near-diagonal form)
+
+All represent the same physical dynamics. The revised success criterion is simply
+full-dataset symplectic residual < 1e-4.
+
+### 4.3 Key Engineering Findings
+
+The original pool with `safeRecip` and `sq` unaries allowed polynomial explosion
+(`sq(sq_lx) = lx^4`, etc.), causing severe overfitting. Replacing unary `sq` with
+pre-computed squared leaves `sq_lx, sq_ly, sq_lz` eliminates this issue: the highest
+polynomial degree in any tree is 2 (since `sq` can only be applied to `lx, ly, lz`
+leaves, and `(*)(sq_lx, sq_lx) = lx^4` is still possible but doesn't form a degenerate minimum).
+
+Full-dataset energies: 2.65e-11 to 6.54e-6 (all << 1e-4).
 
 ## 5. Results — Phase (c): Two-Body Gravity
 

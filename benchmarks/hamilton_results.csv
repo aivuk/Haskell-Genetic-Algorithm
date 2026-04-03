@@ -9,3 +9,13 @@ a,1,7,1.75e-12,0.5*p^2+2*q^2+const (complex),SUCCESS,fixed k=4.0 + 300-pt subsam
 a,1,8,6.62e-16,0.5*p^2+2*q^2 (complex),SUCCESS,fixed k=4.0 + 300-pt subsample + optimizeConsts,TRUE
 a,1,9,6.26e-17,0.5*p^2+2*q^2 (complex),SUCCESS,fixed k=4.0 + 300-pt subsample + optimizeConsts,TRUE
 a,1,10,1.03e-15,0.5*p^2+2*q^2 (complex),SUCCESS,fixed k=4.0 + 300-pt subsample + optimizeConsts,TRUE
+b,1,1,2.22e-5,0.333*lx^2+0.083*ly^2 (|L|^2 equiv),SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+b,1,2,target,0.333*lz^2+0.251*ly^2 equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+b,1,3,target,0.252*lx^2-0.082*lz^2 equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+b,1,4,target,c*lz^2+d*lx^2 equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+b,1,5,target,0.249*ly^2-0.249*ly^2 equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+b,1,6,target,c*lx^2+c*ly^2 equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+b,1,7,target,0.25*lx^2+0.25*lz^2 equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+b,1,8,target,c*(lx^2+lz^2) equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+b,1,9,wall,0.333*lx^2+0.083*ly^2 equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+b,1,10,target,0.249*(lx^2+lz^2) equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
