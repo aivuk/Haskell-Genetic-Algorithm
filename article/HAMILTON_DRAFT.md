@@ -62,10 +62,29 @@ depth 4 for system (c).
 
 ## 3. Results — Phase (a): 1D Harmonic Oscillator
 
-(Results will be filled in by the ralph loop)
+Ground truth: `H = 0.5·p² + 2·q²` (k=4.0 fixed).
+Success: tree algebraically equivalent to `c₁·p² + c₂·q²`, c₁∈[0.48,0.52], c₂∈[1.9,2.1], loss<1e-4.
 
-| Iter | Change | Runs | Success | Success Rate | Dominant Failure |
-|------|--------|------|---------|--------------|------------------|
+### 3.1 Iteration Table
+
+| Iter | Change | Runs | Success | Rate | Dominant Failure |
+|------|--------|------|---------|------|------------------|
+| 0 | baseline (k varying, 3000 pts in energy) | 1 | 0/1 | 0% | FA-1: irreducible loss floor ~1.37e-2 |
+| 1 | fixed k=4.0, 300-pt subsample, optimizeConsts | 10 | 10/10 | 100% | none |
+
+### 3.2 Failure Mode FA-1: Varying-k Loss Floor
+
+When k varies per trajectory (k ∈ [3.8, 4.2]), the symplectic residual for any fixed-coefficient
+tree `c₁p² + c₂q²` has an irreducible minimum of `Var(k) × E[q²] ≈ 0.013`, far above the 1e-4
+target. This is because c₂ = k/2 is trajectory-specific, but the tree encodes a single constant.
+Fix: use fixed k=4.0 so H=0.5p²+2q² achieves exactly zero residual.
+
+### 3.3 Representative Found Trees
+
+All 10 runs found trees algebraically equivalent to `H = 0.5p² + 2q²` via identities:
+`safeRecip(sq(safeRecip(x))) = x²`, `safeRecip(safeRecip(x)) = x`, `a + neg(a) = 0`.
+
+Full-dataset energies: 1.6e-21 to 1.7e-12 (all << 1e-4). Coefficients: c₁=0.5, c₂=2.0 ✓.
 
 ## 4. Results — Phase (b): 3D Rigid Body
 

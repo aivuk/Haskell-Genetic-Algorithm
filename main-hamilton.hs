@@ -538,16 +538,22 @@ runHarmonic = do
   putStrLn "=== System (a): 1D Harmonic Oscillator ==="
   pts <- loadHarmonicCSV "data/harmonic.csv"
   putStrLn $ "Loaded " ++ show (length pts) ++ " data points"
-  let cfg = defaultSearchConfig
-        { scMaxWallSeconds = Just 300
+  let searchPts = take 300 pts
+      cfg = defaultSearchConfig
+        { scMaxWallSeconds = Just 270
         , scDepth          = 3
         , scTargetEnergy   = Just 1e-4
         , scCheckpointFile = Just "checkpoint_harmonic.csv"
         }
-      energy tree = sympLossHarmonic pts tree
+      energy tree = sympLossHarmonic searchPts tree
   (bestE, bestT, reason) <- parallelTempering harmonicBins harmonicUns harmonicLeaves energy cfg
   putStrLn $ "Stopped: " ++ reason
-  putStrLn $ "Best energy: " ++ show bestE
+  putStrLn $ "Best energy (search, 300-pt): " ++ show bestE
+  optimizeConsts energy bestT
+  optE <- energy bestT
+  putStrLn $ "After const opt (300-pt): " ++ show optE
+  fullE <- sympLossHarmonic pts bestT
+  putStrLn $ "Full dataset energy: " ++ show fullE
   optTree <- foldConstants bestT
   simpTree <- simplifyTree optTree
   putStrLn $ "Best tree (simplified): " ++ show simpTree
@@ -609,16 +615,22 @@ runRigidBody = do
   putStrLn "=== System (b): 3D Rigid Body ==="
   pts <- loadRigidBodyCSV "data/rigidbody.csv"
   putStrLn $ "Loaded " ++ show (length pts) ++ " data points"
-  let cfg = defaultSearchConfig
+  let searchPts = take 300 pts
+      cfg = defaultSearchConfig
         { scMaxWallSeconds = Just 300
         , scDepth          = 3
         , scTargetEnergy   = Just 1e-4
         , scCheckpointFile = Just "checkpoint_rigidbody.csv"
         }
-      energy tree = sympLossRigidBody pts tree
+      energy tree = sympLossRigidBody searchPts tree
   (bestE, bestT, reason) <- parallelTempering rigidBodyBins rigidBodyUns rigidBodyLeaves energy cfg
   putStrLn $ "Stopped: " ++ reason
-  putStrLn $ "Best energy: " ++ show bestE
+  putStrLn $ "Best energy (search, 300-pt): " ++ show bestE
+  optimizeConsts energy bestT
+  optE <- energy bestT
+  putStrLn $ "After const opt (300-pt): " ++ show optE
+  fullE <- sympLossRigidBody pts bestT
+  putStrLn $ "Full dataset energy: " ++ show fullE
   optTree <- foldConstants bestT
   simpTree <- simplifyTree optTree
   putStrLn $ "Best tree (simplified): " ++ show simpTree
@@ -713,16 +725,22 @@ runTwoBody = do
   putStrLn "=== System (c): Two-Body Gravity ==="
   pts <- loadTwoBodyCSV "data/twobody.csv"
   putStrLn $ "Loaded " ++ show (length pts) ++ " data points"
-  let cfg = defaultSearchConfig
+  let searchPts = take 300 pts
+      cfg = defaultSearchConfig
         { scMaxWallSeconds = Just 300
         , scDepth          = 4
         , scTargetEnergy   = Just 1e-3
         , scCheckpointFile = Just "checkpoint_twobody.csv"
         }
-      energy tree = sympLossTwoBody pts tree
+      energy tree = sympLossTwoBody searchPts tree
   (bestE, bestT, reason) <- parallelTempering twoBodyBins twoBodyUns twoBodyLeaves energy cfg
   putStrLn $ "Stopped: " ++ reason
-  putStrLn $ "Best energy: " ++ show bestE
+  putStrLn $ "Best energy (search, 300-pt): " ++ show bestE
+  optimizeConsts energy bestT
+  optE <- energy bestT
+  putStrLn $ "After const opt (300-pt): " ++ show optE
+  fullE <- sympLossTwoBody pts bestT
+  putStrLn $ "Full dataset energy: " ++ show fullE
   optTree <- foldConstants bestT
   simpTree <- simplifyTree optTree
   putStrLn $ "Best tree (simplified): " ++ show simpTree

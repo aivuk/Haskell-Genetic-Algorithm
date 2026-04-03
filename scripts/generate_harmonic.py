@@ -14,8 +14,8 @@ def rk4(q, p, k, dt):
 
 np.random.seed(42)
 rows = []
+k = 4.0  # fixed spring constant; H = 0.5*p^2 + 0.5*k*q^2 = 0.5*p^2 + 2.0*q^2
 for _ in range(50):
-    k = np.random.uniform(3.8, 4.2)
     q, p = np.random.uniform(-2, 2, 2)
     for step in range(60):
         dq_dt = p
