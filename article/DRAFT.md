@@ -109,30 +109,74 @@ Round-trip validation confirms mean error < 1e-6 (floating-point precision).
 
 ### 5.1 Iteration Table
 
-| Iter | Change | Run | Energy (search) | Energy (full) | Tree (simplified) | Status |
-|------|--------|-----|-----------------|---------------|-------------------|--------|
-| 1 | baseline (depth=5) | 1 | 8.65e-6 | ~0 | exp_q(0.4999·dt·ω) | ✓ |
-| 1 | baseline (depth=5) | 2 | 1.40e-5 | ~0 | exp_q(0.4999·dt·ω) | ✓ |
-| 1 | baseline (depth=5) | 3 | 2.07e-5 | 1e-8 | exp_q(0.5077·dt·(1-dt)·ω) | F6 |
+| Iter | Change | Runs | Success | Success Rate | Dominant Failure | Note |
+|------|--------|------|---------|--------------|------------------|------|
+| 1 | baseline (depth=5) | 3 | 2/3 | 67% | F6 (ApproxExtraDt) | 2 clean, 1 has extra (1-dt) factor |
+| 2 | depth=3 | 3 | 2/3 | 67% | F6 (ApproxExtraDt) | Depth reduction insufficient |
+| 3 | remove add_v | 3+10 | 12/13 | 92% | F7 (QMulComplex) | Rare q_mul overfit |
+| 4 | remove q_mul | 10 | 10/10 | 100% | none | Perfect convergence |
+| 5 | +simplifyTree pass | 10 | 10/10 | 100% | none | Cleaner output trees |
+
+Representative found trees (normalised):
+- `exp_q((0.5 * dt) scale_v omega)` — cleanest form (iterations 4-5)
+- `exp_q(dt scale_v (0.5 scale_v omega))` — scalar order variant, equivalent
+- `exp_q(0.5 scale_v neg_v(dt scale_v neg_v(omega)))` — double-neg wrapper
 
 ### 5.2 Failure Modes Observed
 
-| ID | Name | Example | Cause | Fix |
-|----|------|---------|-------|-----|
-| F6 | ApproxExtraDt | exp_q(c·dt·(1-dt)·ω) | Deep tree uses dt twice; (1-dt)≈1 for small dt so loss is low | Reduce scDepth |
+| ID | Name | Example | Cause | Fix Applied |
+|----|------|---------|-------|-------------|
+| F6 | ApproxExtraDt | `exp_q(c·dt·(1-dt)·ω)` | add_v allows ω + dt·(−ω) = (1−dt)·ω; extra dt term vanishes for small dt | Removed add_v |
+| F7 | QMulComplex | `exp_q(ω) * A * exp_q(−ω) * exp_q(0.5·dt·ω)` | q_mul enables complex quaternion chains that fit data via conjugation identity | Removed q_mul |
 
-Failure modes F1-F5 were prevented by data design choices made before iteration 1 (variable ‖ω‖, variable dt, no norm_v in pool).
+Failure modes F1-F5 (from prior work) were prevented by data design choices before iteration 1: variable ‖ω‖ (no F2), variable dt (no F3), no norm_v in pool (no F2), sufficient rotation magnitude (no F1).
 
 ## 6. Discussion
 
-*(to be filled as evidence accumulates)*
+### 6.1 What the Typed Approach Prevented
 
-The typed approach prevents entire classes of ill-typed expressions. In a standard untyped GP system, a depth-5 tree over scalars, vectors, and quaternions would include ~80% syntactically invalid trees. The GADT representation makes all generated trees well-typed by construction.
+In a standard untyped GP system operating on a flat vector of numbers, representing the mixed-type formula `exp_q(0.5·dt·ω)` requires encoding: quaternions as 4-vectors, angular velocities as 3-vectors, and scalars as single numbers. All arithmetic must be typed by convention and enforced post-hoc. In practice, this means the search wastes significant effort on expressions like `(ω + dt)` (adding a vector to a scalar) or `exp_q(q_prev)` (applying the quaternion exponential to an already-quaternion input). Our GADT representation makes these expressions literally unrepresentable — they would be a Haskell type error.
 
-The most interesting observation from iteration 1 is that the correct formula `exp_q(0.5·dt·ω)` was found in 2 out of 3 runs in under 30 seconds. The third run found a more complex approximation using dt in two positions. This suggests the search landscape has multiple local minima — the correct formula and its "dt-stabilised" variants — and reducing tree depth forces the search toward the simpler exact form.
+This matters empirically: the search space for a depth-3 Quat-output tree over 7 function symbols is much smaller when ill-typed trees are excluded. The correct formula is `exp_q(scale_v(scale(*)(c, dt), ω))` — a specific 4-node tree — and it was found reliably within hundreds of rounds.
+
+### 6.2 What Function Pool Design Revealed
+
+The most instructive finding is that the search reliably exploited degenerate solutions when given functions that made such exploitation easy:
+
+1. **norm_v (removed pre-experiment)**: Allows `‖ω‖ ≈ const` exploitation (F2). If ‖ω‖ is approximately constant across the dataset, the tree can encode it as a constant and find a simpler-looking but wrong formula.
+
+2. **add_v (removed in iteration 3)**: Allows `ω + c·dt·(−ω) = (1−c·dt)·ω` exploitation (F6). The extra dt factor is invisible for small dt, so the loss is low but the formula is wrong.
+
+3. **q_mul (removed in iteration 4)**: Allows conjugation-based equivalent formulas: `exp_q(v) * Q * exp_q(−v)` computes a rotation of Q, enabling complex but numerically correct expressions (F7).
+
+The key insight is that the target formula `exp_q(0.5·dt·ω)` needs only: `(*)` for scalar product, `scale_v` for scalar-vector product, and `exp_q` for the quaternion exponential. All other operations (`add_v`, `q_mul`, `norm_v`) provide extra expressive power that the search exploits before finding the simpler correct form. Curating the function pool based on the expected structure of the solution is a crucial design choice.
+
+### 6.3 Constant Optimizer Behaviour
+
+Even with the correct structural form, the search frequently finds trees with multiple sign-negation layers (e.g., `neg(neg(-0.5))`, `neg_v(neg_v(ω))`). These arise because the Metropolis search freely mutates sign operators and the gradient-based constant optimizer adjusts values to compensate. Functionally, these trees are identical to `exp_q(0.5·dt·ω)`, but they are visually noisy. The `simplifyTree` post-processing pass (iteration 5) absorbs `neg(c)` into the constant value, reducing one layer of negation. Full normalization (eliminating `neg_v(neg_v(·))` chains) requires structural GADT rewrites with existential types, which are more complex to implement in Haskell and are left for future work.
+
+### 6.4 Speed of Convergence
+
+All successful runs completed in well under 300 seconds (usually within a few seconds to tens of seconds). The combination of 12 parallel-tempering chains and a 300-point subsample is highly effective. The high-temperature chains escape local minima, and the low-temperature chains refine constants once the correct structural form is found. This suggests that the typed approach eliminates enough of the search space that the remaining MCMC exploration is tractable even for a non-convex landscape.
+
+### 6.5 Failed Experiments and Negative Results
+
+- Depth=3 alone (iteration 2) was insufficient to eliminate F6; the root cause was the `add_v` operator, not tree depth.
+- The `simplifyTree` pass did not fully normalise trees with multiple neg_v layers due to GADT type constraints; this is a limitation of the Haskell implementation rather than the method.
+- The `scTargetEnergy=5e-5` threshold was reached by F7 trees (complex q_mul chains), showing that energy alone is not sufficient to distinguish correct from complex-but-equivalent trees. Structure inspection is also necessary.
 
 ## 7. Conclusion
 
-*(to be filled as evidence accumulates)*
+We presented a typed symbolic regression system built in Haskell using a GADT expression tree, applied to discovering the quaternion integration formula `Δq = exp_q(0.5·dt·ω)` from synthetic motion capture data. The key contributions are:
 
-We demonstrated that a multi-typed GADT symbolic regression system can discover the quaternion integration formula from synthetic motion capture data within seconds. The typed tree representation eliminates type errors from the search space, and parallel tempering provides efficient exploration. Future work includes: richer type systems (matrices, Lie algebra elements), real CMU mocap data, and integration with equality saturation (e-graphs) for automatic tree simplification.
+1. **Multi-typed GADT trees**: All nodes are statically typed, eliminating ill-typed expressions from the search space by construction. No post-hoc type checking is needed.
+
+2. **Minimal function pool design**: We showed that reducing the pool to only the operators needed for the target formula (from {(*), scale_v, add_v, q_mul, exp_q, neg_v, neg} to {(*), scale_v, exp_q, neg_v, neg}) eliminates the three observed failure modes (F6, F7) without preventing the correct formula from being found.
+
+3. **Parallel tempering on tree space**: 12 chains at log-spaced temperatures from 0.001 to 10.0, with 200 Metropolis steps between swaps, reliably finds the target formula. With the final function pool, the success rate is 10/10 (100%) across independent runs.
+
+4. **Iterative failure mode analysis**: We identified two new failure modes (F6: extra dt factor; F7: complex quaternion product) by running the search, inspecting found trees algebraically, and tracing how each operator enabled degenerate solutions. This analysis directly guided pool design.
+
+The iterative research loop — run, analyse, fix one thing, repeat — was essential. Early runs succeeded 67% of the time; by iteration 4, success was 100%. Each iteration provided a concrete algebraic diagnosis of what went wrong, making the fixes targeted rather than heuristic.
+
+**Future work** includes: testing on real CMU mocap data with sensor noise, extending the type system to Lie algebra elements and rotation matrices, implementing full algebraic normalisation via e-graph equality saturation adapted for multi-sorted terms, and applying the approach to other physics-structured discovery problems (e.g., identifying Hamiltonian structure from trajectory data).

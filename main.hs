@@ -1,5 +1,6 @@
 module Main where
 
+import Prelude hiding ((<*>))
 import System.Random.Mersenne
 import Control.Monad.State
 import GeneticProgramming
@@ -135,6 +136,20 @@ ul = [ ("Psqr", psqr),
 binArr = listToArray bl
 unArr = listToArray ul
 
+treeToLatex :: Tree Double -> String
+treeToLatex V = "x"
+treeToLatex (Un (name, _) u) = case name of
+    "Psqr" -> "\\sqrt{\\left|" ++ treeToLatex u ++ "\\right|}"
+    "Pexp" -> "e^{" ++ treeToLatex u ++ "}"
+    "Plog" -> "\\ln\\left(" ++ treeToLatex u ++ "\\right)"
+    _      -> name ++ "\\left(" ++ treeToLatex u ++ "\\right)"
+treeToLatex (Bin (name, _) l r) = case name of
+    "(+)"  -> "\\left(" ++ treeToLatex l ++ " + " ++ treeToLatex r ++ "\\right)"
+    "(-)"  -> "\\left(" ++ treeToLatex l ++ " - " ++ treeToLatex r ++ "\\right)"
+    "(*)"  -> treeToLatex l ++ " \\cdot " ++ treeToLatex r
+    "Pdiv" -> "\\frac{" ++ treeToLatex l ++ "}{" ++ treeToLatex r ++ "}"
+    _      -> name ++ "\\left(" ++ treeToLatex l ++ ", " ++ treeToLatex r ++ "\\right)"
+
 -- Perceptron
 
 makePerceptron :: Vector            -- Weight Vector
@@ -148,16 +163,36 @@ makePerceptron w b = f
 
 perceptron = makePerceptron (V.fromList [1,2,3,4]) 0.3
 
-grid = V.fromList [0, 0.2 .. 10] :: V.Vector Double
-points = V.map (\x -> (x, sin x + x*cos x)) grid
+splitOn :: Char -> String -> [String]
+splitOn delim = foldr f [""]
+  where
+    f c (x:xs) | c == delim = "" : x : xs
+               | otherwise  = (c:x) : xs
+    f _ [] = []
 
-ef = energyF points grid
+loadCSV :: FilePath -> Int -> IO (V.Vector (Double, Double))
+loadCSV path colIdx = do
+    content <- readFile path
+    let ls         = drop 1 $ lines content
+        hasData l  = let cols = splitOn ',' l
+                     in  length cols > colIdx && not (null (cols !! 1)) && not (null (cols !! colIdx))
+        parseLine l = let cols = splitOn ',' l
+                      in  (read (cols !! 1), read (cols !! colIdx))
+    return $ V.fromList $ map parseLine $ filter hasData ls
 
 main = do
+    csvData <- loadCSV "../pinheiroTech/curves-data/all_curves.csv" 2
+    let timeVec = V.map fst csvData
+        ef      = energyF csvData timeVec
     g <- getStdGen
     (_,_,ts) <- fmap unzip3 $ evalStateT (parallelMc 15 binArr unArr ef (10**(-4)) 100 (10^5) 10 30 5) g
-    trees <- mapM readIORef ts 
+    trees <- mapM readIORef ts
     let tmin = snd $ minimumBy (\x y -> compare (fst x) (fst y)) trees
-    mapM_ (\x -> printf "%f %f\n" x $ (treeToFunc tmin) x) [1, 1.2 .. 8]
+    putStrLn $ "Best tree: " ++ show tmin
+    putStrLn ""
+    putStrLn $ "LaTeX: $" ++ treeToLatex tmin ++ "$"
+    putStrLn ""
+    printf "%-10s %-15s %-15s %-15s\n" ("x"::String) ("found"::String) ("target"::String) ("error"::String)
+    V.mapM_ (\(x, y) -> printf "%-10.4f %-15.6f %-15.6f %-15.6f\n" x (treeToFunc tmin x) y (abs (treeToFunc tmin x - y))) csvData
 
 

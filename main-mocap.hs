@@ -124,6 +124,25 @@ foldConstants t
         PUn  n f u   -> PUn  n f <$> foldConstants u
         _            -> return t
 
+-- | Algebraic normalization: fold neg directly into PConst values.
+-- Replaces neg(c) with the literal negated constant node, reducing visual noise.
+-- Applied recursively until no more changes occur.
+simplifyTree :: forall a b. (Typeable b) => PTree a b -> IO (PTree a b)
+simplifyTree t = do
+    t' <- step t
+    if show t' == show t then return t' else simplifyTree t'
+  where
+    step :: forall c. Typeable c => PTree a c -> IO (PTree a c)
+    step (PBin n f l r) = PBin n f <$> step l <*> step r
+    step (PUn n f u)    = do
+        u' <- step u
+        case eqT @c @Double of
+          Just Refl | n == "neg" -> case u' of
+            PConst ref -> do v <- readIORef ref; ref' <- newIORef (negate v); return (PConst ref')
+            _          -> return (PUn n f u')
+          _ -> return (PUn n f u')
+    step other = return other
+
 ------------------------------------------------------------------------
 -- Open function pool types
 ------------------------------------------------------------------------
@@ -277,8 +296,6 @@ mocapBins :: [TBin]
 mocapBins =
     [ TBin "(*)"     ((*) :: Double -> Double -> Double)
     , TBin "scale_v" ((*^) :: Double -> Vec3 -> Vec3)
-    , TBin "add_v"   ((+)  :: Vec3 -> Vec3 -> Vec3)
-    , TBin "q_mul"   ((*) :: Quat -> Quat -> Quat)
     ]
 
 mocapUns :: [TUn]
@@ -538,13 +555,14 @@ main = do
     -- Fine-tune constants on full dataset now that search is done
     optimizeConsts (energyMocap allPts') best
     eFinal <- energyMocap allPts' best
-    simplified <- foldConstants best
+    simplified  <- foldConstants best
+    normalized  <- simplifyTree simplified
 
     putStrLn $ "\nStopped: " ++ reason
     printf "Search energy (300 pts):  %.8f\n" e
     printf "Final energy (all %d pts): %.8f\n" (V.length allPts') eFinal
     printf "Best tree (raw):        %s\n" (show best)
-    printf "Best tree (simplified): %s\n" (show simplified)
+    printf "Best tree (normalized): %s\n" (show normalized)
 
     putStrLn "\nSample predictions (first 5 rows):"
     printf "%-12s %-12s %-12s  dq_target_w  dq_found_w\n"

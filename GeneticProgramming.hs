@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -fno-warn-unused-do-bind -XGADTs #-}
 
 module GeneticProgramming 
-    ( Tree
+    ( Tree (..)
     , TreeType (..)
     , NodeType
     -- Functions
@@ -393,13 +393,14 @@ printDot tree = do
     toDot tree 1 
     printf "}"
       where
-        toDot (Bin f l r) i = do 
+        toDot :: Tree a -> Int -> IO ()
+        toDot (Bin f l r) i = do
             printf "\t%d [level = \"%s\"]" i (fst f)
             let st = sizeTree l
             printf "\t %d -> %d\n\t %d -> %d\n" i (i + 1) i (i + 1 + st)
             toDot l (i + 1)
             toDot r (1 + i + st)
-        toDot (Un f u) i = do 
+        toDot (Un f u) i = do
                 printf "\t%d [label = \"%d\"]\n" i (fst f)
                 printf "\t%d -> %d\n" i (i + 1)
                 toDot u (i + 1)

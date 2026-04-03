@@ -10,16 +10,21 @@ import sys
 import numpy as np
 
 def main():
-    out_path = sys.argv[1] if len(sys.argv) > 1 else "data/09_01.bvh"
+    out_path = sys.argv[1] if len(sys.argv) > 1 else "data/mocap_sample.csv"
     n_frames = 3000
-    dt = 1.0 / 120.0  # 120 Hz, typical mocap
+    # Vary dt between frames (50-200 Hz) so the tree cannot absorb dt into constants
+    rng_dt = np.random.default_rng(7)
+    dts = rng_dt.uniform(1.0/200.0, 1.0/50.0, size=n_frames)
 
     # Generate smoothly varying angular velocity (rad/s) using low-freq sine waves
     rng = np.random.default_rng(42)
-    t = np.arange(n_frames) * dt
-    omega_x = 0.8 * np.sin(2 * np.pi * 0.3 * t) + 0.3 * np.sin(2 * np.pi * 1.1 * t)
-    omega_y = 0.6 * np.cos(2 * np.pi * 0.2 * t) + 0.2 * np.sin(2 * np.pi * 0.7 * t)
-    omega_z = 0.4 * np.sin(2 * np.pi * 0.5 * t) + 0.1 * np.cos(2 * np.pi * 1.3 * t)
+    t = np.cumsum(dts)  # time axis built from variable dts
+    # Amplitude modulated by a slowly varying envelope so ||omega|| ranges
+    # from ~0.1 to ~15 rad/s — prevents SR from exploiting constant ||omega||
+    envelope = 1.0 + 7.0 * (0.5 + 0.5 * np.sin(2 * np.pi * 0.05 * t))
+    omega_x = envelope * (0.6 * np.sin(2 * np.pi * 0.3 * t) + 0.3 * np.sin(2 * np.pi * 1.1 * t))
+    omega_y = envelope * (0.5 * np.cos(2 * np.pi * 0.2 * t) + 0.2 * np.sin(2 * np.pi * 0.7 * t))
+    omega_z = envelope * (0.3 * np.sin(2 * np.pi * 0.5 * t) + 0.1 * np.cos(2 * np.pi * 1.3 * t))
 
     # Integrate to get quaternion sequence using exp_q
     def quat_exp(v):
@@ -38,44 +43,55 @@ def main():
             w1*z2 + x1*y2 - y1*x2 + z1*w2,
         ])
 
-    # Build quaternion sequence [w, x, y, z]
+    # Build quaternion sequence [w, x, y, z] using per-frame dt
     quats = [np.array([1.0, 0.0, 0.0, 0.0])]
     for i in range(n_frames - 1):
         omega = np.array([omega_x[i], omega_y[i], omega_z[i]])
-        dq = quat_exp(omega * dt / 2.0)
+        dq = quat_exp(omega * dts[i] / 2.0)
         q_next = quat_mul(quats[-1], dq)
         q_next = q_next / np.linalg.norm(q_next)
         quats.append(q_next)
     quats = np.array(quats)
 
-    # Convert quaternions [w,x,y,z] -> Euler ZXY degrees for BVH
-    from scipy.spatial.transform import Rotation
-    # scipy expects [x,y,z,w]
-    q_xyzw = quats[:, [1, 2, 3, 0]]
-    r = Rotation.from_quat(q_xyzw)
-    euler_zxy = r.as_euler('ZXY', degrees=True)  # (N, 3): Z, X, Y
+    # Write CSV directly (bypass BVH — variable dt can't be stored in BVH format)
+    # Columns: omega_x, omega_y, omega_z, dt, dq_w, dq_x, dq_y, dq_z
+    rows = []
+    for i in range(n_frames - 1):
+        omega = np.array([omega_x[i], omega_y[i], omega_z[i]])
+        q_prev, q_curr = quats[i], quats[i + 1]
 
-    # Write BVH file (minimal CMU-style skeleton with just root)
+        def quat_conjugate(q):
+            return np.array([q[0], -q[1], -q[2], -q[3]])
+
+        dq = quat_mul(quat_conjugate(q_prev), q_curr)
+        dq = dq / np.linalg.norm(dq)
+        rows.append((omega[0], omega[1], omega[2], dts[i],
+                     dq[0], dq[1], dq[2], dq[3]))
+
+    # Validate round-trip
+    def quat_exp_v(v):
+        h = np.linalg.norm(v)
+        if h < 1e-10:
+            return np.array([1.0, 0.0, 0.0, 0.0])
+        return np.array([np.cos(h), *(np.sin(h) / h * v)])
+
+    errors = []
+    for (ox, oy, oz, dt_i, dw, dx, dy, dz) in rows:
+        dq_hat = quat_exp_v(np.array([ox, oy, oz]) * dt_i / 2.0)
+        dq_tgt = np.array([dw, dx, dy, dz])
+        d = abs(np.dot(dq_hat, dq_tgt))
+        errors.append(1.0 - d * d)
+    mean_err = float(np.mean(errors))
+    print(f"Validation: mean loss = {mean_err:.2e}  (target < 1e-6)")
+    assert mean_err < 1e-6, f"FAILED: {mean_err}"
+
     with open(out_path, 'w') as f:
-        f.write("HIERARCHY\n")
-        f.write("ROOT Hips\n")
-        f.write("{\n")
-        f.write("\tOFFSET 0.00 0.00 0.00\n")
-        f.write("\tCHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation\n")
-        f.write("\tEnd Site\n")
-        f.write("\t{\n")
-        f.write("\t\tOFFSET 0.00 10.00 0.00\n")
-        f.write("\t}\n")
-        f.write("}\n")
-        f.write("MOTION\n")
-        f.write(f"Frames: {n_frames}\n")
-        f.write(f"Frame Time: {dt:.6f}\n")
-        for i in range(n_frames):
-            zr, xr, yr = euler_zxy[i]
-            # Xpos Ypos Zpos Zrot Xrot Yrot
-            f.write(f"0.000000 0.000000 0.000000 {zr:.6f} {xr:.6f} {yr:.6f}\n")
+        f.write("omega_x,omega_y,omega_z,dt,dq_w,dq_x,dq_y,dq_z\n")
+        for row in rows:
+            f.write(",".join(f"{v:.10f}" for v in row) + "\n")
 
-    print(f"Written {n_frames} frames to {out_path} (dt={dt:.6f}s)")
+    dt_mean = float(np.mean(dts))
+    print(f"Written {len(rows)} rows to {out_path} (dt varies {dts.min():.4f}–{dts.max():.4f}s, mean {dt_mean:.4f}s)")
 
 
 if __name__ == "__main__":

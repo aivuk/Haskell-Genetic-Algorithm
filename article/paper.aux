@@ -1,0 +1,105 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{koza1992}
+\citation{koza1992}
+\citation{udrescu2020}
+\citation{cranmer2023}
+\citation{udrescu2020}
+\citation{brunton2016}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{Characterize-first principle.}{1}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Contributions.}{1}{section*.2}\protected@file@percent }
+\citation{gompertz1825}
+\citation{verhulst1838}
+\citation{baranyi1994}
+\citation{richards1959}
+\citation{brunton2016}
+\citation{lindeberg1994}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{section.2}\protected@file@percent }
+\newlabel{sec:background}{{2}{2}{Background}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Bacterial Growth Models}{2}{subsection.2.1}\protected@file@percent }
+\newlabel{eq:gompertz}{{1}{2}{Bacterial Growth Models}{equation.2.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}SINDy and Sparse ODE Detection}{2}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Linear ODE Inversion}{2}{section.3}\protected@file@percent }
+\newlabel{sec:linear_ode}{{3}{2}{Linear ODE Inversion}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Problem Formulation}{2}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Derivative Estimation via Gaussian Filters}{3}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Bandwidth selection.}{3}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Edge trimming.}{3}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}STRidge Detection}{3}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Noise Robustness}{3}{subsection.3.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Linear ODE detection ($f'' + f = 0$) under noise for $f(x)=\sin (x)$}}{3}{table.1}\protected@file@percent }
+\newlabel{tab:noise}{{1}{3}{Linear ODE detection ($f'' + f = 0$) under noise for $f(x)=\sin (x)$}{table.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Nonlinear ODE Detection for Growth Data}{4}{section.4}\protected@file@percent }
+\newlabel{sec:nonlinear_ode}{{4}{4}{Nonlinear ODE Detection for Growth Data}{section.4}{}}
+\newlabel{eq:gompertz_ode}{{8}{4}{Nonlinear ODE Detection for Growth Data}{equation.4.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}B1: Log-Space Linearisation}{4}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}B2: Direct Gompertz ODE Scanning}{4}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}B3: STRidge on Growth Feature Library}{4}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Results}{4}{section.5}\protected@file@percent }
+\newlabel{sec:results}{{5}{4}{Results}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Data}{4}{subsection.5.1}\protected@file@percent }
+\citation{baranyi1994}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Linear ODE Detection on Real Data}{5}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Nonlinear ODE Detection (Step B)}{5}{subsection.5.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Model fitting results on real bacterial growth data}}{5}{table.2}\protected@file@percent }
+\newlabel{tab:results_b}{{2}{5}{Model fitting results on real bacterial growth data}{table.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{B2 achieves parametric-level accuracy without prior knowledge of the model class.}{5}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{B3 correctly classifies all three curves as Gompertz-type}{5}{section*.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Model Discrimination: Gompertz vs Logistic}{5}{subsection.5.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}ODE Discovery for Complex Growth Models}{5}{section.6}\protected@file@percent }
+\newlabel{sec:complex}{{6}{5}{ODE Discovery for Complex Growth Models}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}aHPM: Heterogeneous Population Model}{6}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Theoretical derivation.}{6}{section*.7}\protected@file@percent }
+\newlabel{eq:ahpm_compact}{{15}{6}{Theoretical derivation}{equation.6.15}{}}
+\@writefile{toc}{\contentsline {paragraph}{Simple approximation.}{6}{section*.8}\protected@file@percent }
+\newlabel{eq:ahpm_approx}{{16}{6}{Simple approximation}{equation.6.16}{}}
+\@writefile{toc}{\contentsline {paragraph}{Results.}{6}{section*.9}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces aHPM fitting results (strong lag, $L_0=0.15$, $\delta =0.15$, $K=1.0$)}}{6}{table.3}\protected@file@percent }
+\newlabel{tab:ahpm}{{3}{6}{aHPM fitting results (strong lag, $L_0=0.15$, $\delta =0.15$, $K=1.0$)}{table.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Inflection fingerprint.}{6}{section*.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Diauxic Growth: Theoretical Impossibility and Discovery}{6}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Key theoretical result.}{7}{section*.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Phase-segmented symbolic boosting.}{7}{section*.12}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Phase-segmented boosting on double-Gompertz synthetic diauxic data}}{7}{table.4}\protected@file@percent }
+\newlabel{tab:diauxic}{{4}{7}{Phase-segmented boosting on double-Gompertz synthetic diauxic data}{table.4}{}}
+\@writefile{toc}{\contentsline {paragraph}{Smooth diauxic: Gompertz-logistic hybrid.}{7}{section*.13}\protected@file@percent }
+\newlabel{eq:gomp_logistic}{{17}{7}{Smooth diauxic: Gompertz-logistic hybrid}{equation.6.17}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Model-Free ODE Discovery on Synthetic Diauxic Data}{7}{subsection.6.3}\protected@file@percent }
+\newlabel{sec:modelfree_diauxic}{{6.3}{7}{Model-Free ODE Discovery on Synthetic Diauxic Data}{subsection.6.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Step 1: Derivative fingerprint.}{7}{section*.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Step 2: 2nd-order autonomous ODE discovery.}{7}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Step 3: Direct ODE scan discovers Gompertz structure.}{8}{section*.16}\protected@file@percent }
+\newlabel{eq:discovered_gompertz}{{20}{8}{Step 3: Direct ODE scan discovers Gompertz structure}{equation.6.20}{}}
+\@writefile{toc}{\contentsline {paragraph}{Why the Gompertz ODE dominates.}{8}{section*.17}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Model-free ODE discovery on synthetic Monod diauxic data}}{8}{table.5}\protected@file@percent }
+\newlabel{tab:modelfree}{{5}{8}{Model-free ODE discovery on synthetic Monod diauxic data}{table.5}{}}
+\@writefile{toc}{\contentsline {paragraph}{Conclusion.}{8}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Grammar Constraint for Symbolic Regression}{8}{section.7}\protected@file@percent }
+\newlabel{sec:discussion}{{7}{8}{Grammar Constraint for Symbolic Regression}{section.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}From ODE to Grammar Prior}{8}{subsection.7.1}\protected@file@percent }
+\citation{messenger2021}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Grammar Constraint in Practice}{9}{subsection.7.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Phase-Segmented Symbolic Boosting}{9}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Discussion and Future Work}{9}{section.8}\protected@file@percent }
+\newlabel{sec:future}{{8}{9}{Discussion and Future Work}{section.8}{}}
+\@writefile{toc}{\contentsline {paragraph}{Limitations.}{9}{section*.19}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Weak/integral formulation.}{9}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Non-Gompertz data.}{9}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Full SR pipeline.}{9}{section*.22}\protected@file@percent }
+\bibstyle{plain}
+\bibcite{koza1992}{1}
+\bibcite{udrescu2020}{2}
+\bibcite{cranmer2023}{3}
+\bibcite{brunton2016}{4}
+\bibcite{gompertz1825}{5}
+\bibcite{verhulst1838}{6}
+\bibcite{baranyi1994}{7}
+\bibcite{richards1959}{8}
+\bibcite{lindeberg1994}{9}
+\bibcite{messenger2021}{10}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Conclusion}{10}{section.9}\protected@file@percent }
+\gdef \@abspage@last{10}

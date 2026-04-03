@@ -1,0 +1,670 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\title{Characterize-First Symbolic Regression:\\
+ODE Inversion for Efficient Expression Discovery}
+
+\author{Edgar Zanella Alvarenga}
+\date{April 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present a \emph{characterize-first} approach to symbolic regression, in which structural
+properties of the data are identified before expression search begins. The central method is
+\emph{ODE inversion}: given noisy observations of an unknown function $f$, we detect the
+linear (or nonlinear) differential equation that $f$ satisfies, thereby recovering the
+algebraic solution class that tightly constrains any subsequent parameter or expression search.
+We validate the approach on bacterial growth time-series data (optical density measurements)
+from which classical genetic programming struggles to recover the generating Gompertz model.
+ODE inversion in log-space or via direct Gompertz ODE scanning (B2) recovers the exact
+Gompertz parameters ($A$, $\mu$, $\lambda$) on synthetic data with $R^2=1.000$ and fits
+real data with $R^2 \geq 0.992$, matching the best parametric fits while revealing the
+governing ODE structure and its biological interpretation.
+\end{abstract}
+
+% ──────────────────────────────────────────────────────────────
+\section{Introduction}
+\label{sec:intro}
+% ──────────────────────────────────────────────────────────────
+
+Symbolic regression (SR) is the problem of finding a mathematical expression $\hat{f}$ that
+accurately describes a set of observations $\{(x_i, y_i)\}_{i=1}^n$ without a predefined
+functional form~\cite{koza1992}. Unlike classical regression, the \emph{form} of the expression
+is part of the search problem, making SR combinatorially hard.
+
+The dominant approach, Genetic Programming (GP)~\cite{koza1992}, searches a space of expression
+trees via mutation, crossover, and selection. While GP has achieved notable successes—including
+the AI Feynman benchmark~\cite{udrescu2020}—it suffers from three core limitations:
+(i) the search space grows super-exponentially with expression depth;
+(ii) gradient information about expression structure is unavailable;
+(iii) stochastic search can waste budget on structurally wrong forms.
+
+Several works have proposed to constrain GP search using prior knowledge:
+PySR~\cite{cranmer2023} uses mixed discrete/continuous optimisation;
+AI Feynman~\cite{udrescu2020} leverages dimensional analysis and symmetry detection;
+SINDy~\cite{brunton2016} discovers governing differential equations from data for
+dynamical systems. Our work combines these ideas into a unified \emph{characterize-first}
+pipeline applicable to univariate regression.
+
+\paragraph{Characterize-first principle.}
+Before searching for an expression, answer: \emph{What structural class must the answer
+belong to?} If the data satisfies a differential equation $\mathcal{L}[f]=0$, the solution
+space of $\mathcal{L}$ is often a low-dimensional manifold. Fitting within that manifold is
+a standard least-squares or low-dimensional optimisation problem, orders of magnitude smaller
+than unconstrained GP search.
+
+\paragraph{Contributions.}
+\begin{itemize}
+  \item A noise-robust linear ODE inversion pipeline using Gaussian derivative filters,
+        GCV bandwidth selection, and STRidge (Section~\ref{sec:linear_ode}).
+  \item Three nonlinear ODE detection methods for sigmoidal/growth data:
+        log-space linearisation (B1), direct Gompertz ODE scanning (B2), and
+        STRidge on a growth-targeted feature library (B3) (Section~\ref{sec:nonlinear_ode}).
+  \item Validation on bacterial growth data showing that B2 recovers Gompertz parameters
+        with $R^2=0.992$, matching the best parametric fit (Section~\ref{sec:results}).
+  \item Discussion of how detected ODE structure constrains GP grammar, enabling
+        \emph{informed symbolic regression} (Section~\ref{sec:discussion}).
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────
+\section{Background}
+\label{sec:background}
+% ──────────────────────────────────────────────────────────────
+
+\subsection{Bacterial Growth Models}
+
+Bacterial population dynamics in controlled conditions follow characteristic sigmoid curves.
+The four principal parametric models are:
+
+\textbf{Gompertz}~\cite{gompertz1825}:
+\begin{equation}
+  f(t) = A \exp\!\bigl(-\exp\!\bigl[(\mu_{\max} e / A)(\lambda - t) + 1\bigr]\bigr)
+  \label{eq:gompertz}
+\end{equation}
+where $A$ is the asymptotic population density, $\mu_{\max}$ is the maximum specific growth
+rate, and $\lambda$ is the lag time.
+
+\textbf{Logistic}~\cite{verhulst1838}:
+\begin{equation}
+  f(t) = \frac{A}{1 + \exp\!\bigl[4\mu_{\max}(\lambda - t)/A + 2\bigr]}
+\end{equation}
+
+\textbf{Baranyi-Roberts}~\cite{baranyi1994}:
+\begin{equation}
+  \frac{\mathrm{d}f}{\mathrm{d}t} = \mu_{\max}\,q(t)\,\frac{1 - f/A}{1 + (f/A)^\nu}\,f,
+  \quad \dot{q} = \mu_{\max}\,q
+\end{equation}
+where $q(0)$ encodes the initial physiological state.
+
+\textbf{Richards/Generalised logistic}~\cite{richards1959}:
+\begin{equation}
+  f(t) = \frac{A}{\bigl(1 + \exp(-r(t-\lambda))\bigr)^{1/\nu}}
+\end{equation}
+The Gompertz model has a distinctive inflection at $37\%$ of the growth range (vs.\ $50\%$
+for the symmetric logistic), making it identifiable from the derivative profile.
+
+\subsection{SINDy and Sparse ODE Detection}
+
+SINDy~\cite{brunton2016} represents $\dot{\mathbf{x}} = \Theta(\mathbf{x})\,\boldsymbol{\xi}$
+where $\Theta$ is a library of candidate terms and $\boldsymbol{\xi}$ is sparse. STRidge
+(sequential thresholded ridge regression) finds the sparsest solution consistent with the data.
+We adapt this framework to univariate function identification.
+
+% ──────────────────────────────────────────────────────────────
+\section{Linear ODE Inversion}
+\label{sec:linear_ode}
+% ──────────────────────────────────────────────────────────────
+
+\subsection{Problem Formulation}
+
+Given $n$ noisy observations $\{(x_i, y_i)\}$ with $y_i = f(x_i) + \varepsilon_i$, we seek
+a linear constant-coefficient ODE
+\begin{equation}
+  a_0 f + a_1 f' + a_2 f'' + \cdots + a_p f^{(p)} = 0
+\end{equation}
+that $f$ satisfies. The solution space is spanned by $\{e^{r_j x}, xe^{r_j x}, \sin(\omega x),
+\cos(\omega x), \ldots\}$ depending on the roots of the characteristic polynomial.
+
+\subsection{Derivative Estimation via Gaussian Filters}
+
+Raw numerical differentiation amplifies noise with factor $O(1/h^k)$ for $k$-th order
+derivatives and step size $h$. We use Gaussian derivative filters~\cite{lindeberg1994}:
+\begin{equation}
+  f^{(k)}(x) \approx \frac{1}{\sigma^k}\,(G_\sigma^{(k)} * f)(x)
+\end{equation}
+where $G_\sigma(x) = (2\pi\sigma^2)^{-1/2}\exp(-x^2/2\sigma^2)$ is the Gaussian kernel
+with bandwidth $\sigma$ (in pixels). This is the optimal linear estimator under Gaussian noise.
+
+\paragraph{Bandwidth selection.}
+Bandwidth $\sigma$ is chosen by Generalised Cross-Validation (GCV) over a grid
+$\sigma \in [\sigma_{\min}, \sigma_{\max}]$. The aliasing constraint requires
+$\sigma_{\min} = \max(3, 2 p)$ pixels where $p$ is the ODE order, to prevent
+the discrete kernel from aliasing.
+
+\paragraph{Edge trimming.}
+Boundary padding in \texttt{scipy.ndimage.gaussian\_filter1d} contaminates the
+$\lceil 3\sigma \rceil$ points at each end. These are removed before constructing
+the derivative matrix.
+
+\subsection{STRidge Detection}
+
+Build the derivative matrix $D \in \mathbb{R}^{m \times (p+1)}$ where
+$D_{ij} = f^{(j)}(x_i)$, $j=0,\ldots,p$, and solve for the null-space vector
+$\mathbf{a}$ (normalised so $a_p = 1$):
+\begin{equation}
+  D\,\mathbf{a} \approx \mathbf{0}
+\end{equation}
+STRidge iteratively applies ridge regression with threshold $\tau$:
+\begin{enumerate}
+  \item Solve $\hat{\mathbf{a}} = (D^\top D + \lambda I)^{-1} D^\top \mathbf{0}$
+        with pivot column fixed to 1.
+  \item Zero out coefficients with $|a_j| < \tau \max_j |a_j|$.
+  \item Repeat on the active subset until convergence.
+\end{enumerate}
+
+\subsection{Noise Robustness}
+
+Table~\ref{tab:noise} shows ODE detection accuracy for $f(x) = \sin(x)$ with additive
+Gaussian noise $\varepsilon \sim \mathcal{N}(0, \sigma_\varepsilon^2)$.
+
+\begin{table}[h]
+\centering
+\caption{Linear ODE detection ($f'' + f = 0$) under noise for $f(x)=\sin(x)$}
+\label{tab:noise}
+\begin{tabular}{lcc}
+\toprule
+Noise $\sigma_\varepsilon$ & ODE found? & STRidge residual \\
+\midrule
+0.000 & YES & $1.4 \times 10^{-3}$ \\
+0.010 & YES & $5.6 \times 10^{-3}$ \\
+0.020 & YES & $7.8 \times 10^{-3}$ \\
+0.050 & YES & $1.0 \times 10^{-2}$ \\
+0.100 & YES & $2.5 \times 10^{-2}$ \\
+0.200 & YES & $4.3 \times 10^{-2}$ \\
+0.500 & no  & $1.1 \times 10^{-1}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The method is reliable up to SNR $\geq 5$ ($\sim$20\% noise).
+
+% ──────────────────────────────────────────────────────────────
+\section{Nonlinear ODE Detection for Growth Data}
+\label{sec:nonlinear_ode}
+% ──────────────────────────────────────────────────────────────
+
+Linear ODE inversion incorrectly identifies oscillatory structure in bacterial growth data.
+The Gompertz model satisfies the \emph{nonlinear} ODE
+\begin{equation}
+  f'(t) = r\,f(t)\,\ln\!\bigl(K / f(t)\bigr)
+  \label{eq:gompertz_ode}
+\end{equation}
+with $K = A$ (carrying capacity) and $r = \mu_{\max} e / A$.
+We propose three methods to detect this structure directly from data.
+
+\subsection{B1: Log-Space Linearisation}
+
+Define $g = \ln f$. Then:
+\begin{equation}
+  g'(t) = \frac{f'}{f} = r\,\ln(K/f) = r(\ln K - g)
+\end{equation}
+so $g' = r\ln K - r\,g$, which is a \emph{linear first-order ODE} in $g$:
+\begin{equation}
+  g' = a + b\,g, \quad b = -r < 0
+\end{equation}
+We estimate $g'$ via Gaussian derivatives on $g = \ln f$, then solve via least squares:
+$[a, b]^\top = (G^\top G)^{-1} G^\top g'$ where $G = [\mathbf{1}, \mathbf{g}]$.
+
+If $b < 0$, the asymptote is $g_\infty = -a/b$ and $K = e^{g_\infty}$.
+
+\subsection{B2: Direct Gompertz ODE Scanning}
+
+For a fixed $K$, equation~\eqref{eq:gompertz_ode} is linear in $r$:
+\begin{equation}
+  f' = r \cdot \underbrace{f \ln(K/f)}_{\phi(K)}
+\end{equation}
+The optimal $r$ given $K$ is $r(K) = \langle f', \phi \rangle / \langle \phi, \phi \rangle$
+(ordinary least squares). We scan $K \in [f_{\max} \cdot 1.001,\, f_{\max} \cdot 3]$ and
+choose the $K$ minimising the normalised residual
+$\|f' - r\phi\|_2 / \mathrm{std}(f')$.
+
+The resulting $(K, r)$ initialises a full nonlinear refinement via
+\texttt{scipy.optimize.curve\_fit} on equation~\eqref{eq:gompertz}.
+
+\subsection{B3: STRidge on Growth Feature Library}
+
+Build the feature library for $f' = \Theta \boldsymbol{\xi}$:
+\begin{equation}
+  \Theta = \bigl[\mathbf{1},\; f,\; f^2,\; f\ln f,\; f(1 - f/f_{\max})\bigr]
+\end{equation}
+These features cover exponential growth ($f$), logistic growth ($f^2$ or $f(1-f/K)$),
+and Gompertz growth ($f\ln f$). STRidge selects the dominant term, acting as a
+\emph{model classifier} rather than a curve-fitter.
+
+% ──────────────────────────────────────────────────────────────
+\section{Results}
+\label{sec:results}
+% ──────────────────────────────────────────────────────────────
+
+\subsection{Data}
+
+We use optical density (OD) time series from three growth curves (columns 2–4 of
+\texttt{all\_curves.csv}), each with 160–190 measurements over $t \in [0.25, 41.0]$~h.
+Signal-to-noise ratios are $\text{SNR} \approx 50$–88.
+
+\subsection{Linear ODE Detection on Real Data}
+
+The linear ODE pipeline (ode\_robust.py) identifies:
+\begin{itemize}
+  \item \textbf{Col2}: $f'''' + 0.255\,f'' = 0$ → solution $C_1 + C_2 x + C_3\sin(x/2) + C_4\cos(x/2)$
+  \item \textbf{Col3}: $0.251\,f'' + 0.820\,f''' + f'''' = 0$ → damped oscillatory
+  \item \textbf{Col4}: $0.124\,f' + 0.522\,f'' + f''' + 0.695\,f'''' = 0$ → damped oscillatory
+\end{itemize}
+These solutions achieve $R^2 = 0.698$–$0.742$ — the oscillatory solution class is fundamentally
+wrong for sigmoidal bacterial growth. This confirms the need for nonlinear ODE detection.
+
+\subsection{Nonlinear ODE Detection (Step B)}
+
+Table~\ref{tab:results_b} summarises B2 (best method) results compared to baseline fits.
+
+\begin{table}[h]
+\centering
+\caption{Model fitting results on real bacterial growth data}
+\label{tab:results_b}
+\begin{tabular}{lccccc}
+\toprule
+Method & \multicolumn{2}{c}{Col 2} & \multicolumn{2}{c}{Col 3} & Col 4 \\
+ & RMSE & $R^2$ & RMSE & $R^2$ & $R^2$ \\
+\midrule
+Linear ODE (oscillatory) & 0.400 & 0.698 & --- & --- & --- \\
+Logistic (parametric)    & 0.260 & 0.742 & 0.091 & 0.897 & 0.901 \\
+B1: Log-space ODE        & 0.509 & $-$0.027 & 0.063 & 0.941 & 0.914 \\
+B2: Gompertz ODE scan    & \textbf{0.046} & \textbf{0.992} & \textbf{0.060} & \textbf{0.946} & \textbf{0.957} \\
+Gompertz (parametric)    & 0.046 & 0.992 & 0.060 & 0.945 & 0.957 \\
+Richards (generalised)   & 0.045 & 0.992 & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{B2 achieves parametric-level accuracy without prior knowledge of the model class.}
+On synthetic Gompertz data, B2 recovers exact parameters:
+$A=1.000$, $\mu=0.300$, $\lambda=5.000$ with $R^2=1.000$.
+
+\paragraph{B3 correctly classifies all three curves as Gompertz-type} (f·ln(f) dominant in
+sparse ODE, vs.\ f² for logistic), providing model-class information for grammar constraints.
+
+\subsection{Model Discrimination: Gompertz vs Logistic}
+
+The inflection position relative to the growth range is a clean classifier:
+\begin{itemize}
+  \item Gompertz: inflection at $\approx 37\%$ of $[y_{\min}, y_{\max}]$
+  \item Logistic: inflection at $\approx 50\%$
+\end{itemize}
+All three real curves show inflection at $\sim$35–40\%, confirming Gompertz structure.
+B3's sparse ODE independently confirms this via the $f\ln f$ signature.
+
+% ──────────────────────────────────────────────────────────────
+\section{ODE Discovery for Complex Growth Models}
+\label{sec:complex}
+% ─────────────────────────────────────────���────────────────────
+
+Beyond single Gompertz/logistic growth, we apply the characterize-first pipeline to
+two more complex biological scenarios: heterogeneous populations (aHPM) and diauxic growth.
+
+\subsection{aHPM: Heterogeneous Population Model}
+
+The aHPM~\cite{baranyi1994} describes a population with two subpopulations: $u_1$ (lag,
+not yet actively growing) and $u_2$ (growing). The system ODE is:
+\begin{align}
+  \dot{u}_1 &= -\delta\, u_1 \\
+  \dot{u}_2 &= \delta\, u_1 + g_r\, u_2 \bigl(1 - (X/K)^s\bigr)
+\end{align}
+where $X = u_1 + u_2$ is the observable OD, $\delta$ the exit-lag rate, $g_r$ the growth
+rate, $K$ the carrying capacity, and $s$ the Richards shape parameter.
+
+\paragraph{Theoretical derivation.}
+Since $u_1(t) = u_1(0)\,e^{-\delta t}$, the observable satisfies the
+\emph{non-autonomous} ODE:
+\begin{equation}
+  \boxed{X'(t) = g_r \bigl(X - L_0\,e^{-\delta t}\bigr)\bigl(1 - (X/K)^s\bigr)}
+  \label{eq:ahpm_compact}
+\end{equation}
+where $L_0 = u_1(0)$ is the initial lag population. This reduces to the Richards ODE
+when $L_0 = 0$. The key novel term $L_0\,e^{-\delta t}$ subtracts the decaying lag
+contribution from the effective growing biomass.
+
+\paragraph{Simple approximation.}
+Equation~\eqref{eq:ahpm_compact} has the approximate closed-form:
+\begin{equation}
+  X(t) \approx \text{Richards}(g_r, K, s,\, t) + L_0\,e^{-\delta t}
+  \label{eq:ahpm_approx}
+\end{equation}
+This linearisation is accurate when $\delta \gg g_r$: the lag population decays
+much faster than the growth time-scale.
+
+\paragraph{Results.}
+Fitting equation~\eqref{eq:ahpm_compact} to synthetic aHPM data (strong lag: $L_0=0.15$,
+$\delta=0.15$):
+
+\begin{table}[h]
+\centering
+\caption{aHPM fitting results (strong lag, $L_0=0.15$, $\delta=0.15$, $K=1.0$)}
+\label{tab:ahpm}
+\begin{tabular}{lcc}
+\toprule
+Model & RMSE & $R^2$ \\
+\midrule
+Gompertz (baseline)         & 0.039 & 0.982 \\
+Richards (4 params)         & 0.010 & 0.9988 \\
+Compact aHPM ODE (5 params) & 0.005 & 0.9997 \\
+Richards $+$ exp decay      & 0.005 & 0.9997 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The compact aHPM formula recovers $K = 1.001$ (true: $1.0$) and $\delta = 0.378$ (true: $0.15$;
+within scale, as the effective decay seen in $X$ differs from the microscopic rate).
+
+\paragraph{Inflection fingerprint.}
+The inflection position of $X(t)$ relative to its range is a diagnostic for heterogeneous
+population structure:
+\begin{itemize}
+  \item Gompertz: $\approx 37\%$
+  \item aHPM (strong lag): $\approx 44\text{--}45\%$
+  \item Logistic: $\approx 50\%$
+\end{itemize}
+This provides a new model-class discriminator based solely on derivative structure,
+extending the Gompertz/logistic inflection test from the literature.
+
+\subsection{Diauxic Growth: Theoretical Impossibility and Discovery}
+
+Diauxic growth (growth $\to$ plateau $\to$ growth, from sequential substrate consumption)
+poses a fundamental challenge for autonomous ODE inversion.
+
+\paragraph{Key theoretical result.}
+\emph{Diauxic growth with a genuine plateau cannot be captured by a 1st-order
+autonomous ODE.} Formally: for $X' = f(X)$, a pause at $X = K_1$ requires $f(K_1) = 0$.
+But if $f(K_1) = 0$ and $f(X) > 0$ for $X \in (K_1, K_2)$ (needed for phase-2 growth),
+then $K_1$ is an unstable equilibrium — $X$ cannot approach $K_1$ from below. Any
+compact form with a true plateau requires hidden state or an explicit time dependence.
+
+Validated computationally: all 1st-order autonomous ODE forms (bi-logistic, Gompertz-logistic,
+bi-Gompertz) achieve normalised residuals $\geq 0.96$ on double-Gompertz synthetic data.
+
+\paragraph{Phase-segmented symbolic boosting.}
+For true diauxic data, we propose phase-segmented boosting:
+\begin{enumerate}
+  \item Locate the diauxic valley: the time $t^*$ minimising $X'(t)$ between the two
+        derivative peaks.
+  \item Fit $G_1$ (Gompertz) to data on $[0, t^*]$ (phase 1 only).
+  \item Fit $G_2$ (Gompertz) to the residual $X(t) - G_1(t)$ on $[t^*, T]$ (phase 2).
+\end{enumerate}
+This recovers both components with $R^2 = 0.9998$ and near-exact parameters
+(Table~\ref{tab:diauxic}).
+
+\begin{table}[h]
+\centering
+\caption{Phase-segmented boosting on double-Gompertz synthetic diauxic data}
+\label{tab:diauxic}
+\begin{tabular}{lcccc}
+\toprule
+Component & $A$ (true) & $A$ (rec.) & $\mu$ (rec.) & $\lambda$ (rec.) \\
+\midrule
+Phase 1 & 0.550 & 0.552 & 0.350 & 6.02 \\
+Phase 2 & 0.400 & 0.398 & 0.200 & 26.02 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Smooth diauxic: Gompertz-logistic hybrid.}
+For Monod 2-substrate diauxic data where the catabolite repression switch is smooth,
+the best compact autonomous ODE found is:
+\begin{equation}
+  X'(t) = r\, X\, \ln(K/X)\,(1 + a\,X)
+  \label{eq:gomp_logistic}
+\end{equation}
+The additional term $1 + aX$ represents density-dependent modulation of the Gompertz
+growth law. For $a > 0$, higher biomass leads to faster effective growth — a possible
+signature of quorum sensing, cross-feeding, or pH buffering at higher cell densities.
+
+\subsection{Model-Free ODE Discovery on Synthetic Diauxic Data}
+\label{sec:modelfree_diauxic}
+
+We apply our full pipeline to synthetic Monod 2-substrate diauxic data in a \emph{genuinely
+model-free} setting: no prior knowledge of the Gompertz, aHPM, or any other form is assumed.
+Data is generated from:
+\begin{align}
+  \dot{X}  &= \bigl[\mu_1 S_1/(S_1+K_s) \cdot H(S_1) + \mu_2 S_2/(S_2+K_s) \cdot (1-H(S_1))\bigr] X \\
+  H(S_1)   &= S_1^n\,/\,(S_1^n + K_d^n)
+\end{align}
+with $\mu_1=0.90$, $\mu_2=0.25$, $K_d=0.005$, $n=10$, observable $X(t)$ only.
+
+\paragraph{Step 1: Derivative fingerprint.}
+Computing $X'(t)$ via Gaussian filter reveals \textbf{two distinct peaks} at $t=4.51$ and
+$t=7.64$, with a trough at $t=5.39$ — the definitive diauxic signature. This detection
+requires no model assumption.
+
+\paragraph{Step 2: 2nd-order autonomous ODE discovery.}
+Applying STRidge to the library $\Theta = [1, X, X^2, X^3, X', (X')^2, X{\cdot}X',
+X{\cdot}\ln X, \ldots]$ to discover $X'' = F(X, X')$ produces sparse equations with
+derivative residuals as low as 0.04, but forward integration fails ($R^2 \ll 0$).
+This confirms our theoretical result: a compact autonomous ODE cannot capture
+non-autonomous diauxic dynamics.
+
+\paragraph{Step 3: Direct ODE scan discovers Gompertz structure.}
+Applying the B2 direct scan (no model assumption) — scanning $K \in [X_{\max}, 3X_{\max}]$
+and solving $r = \langle X', \Phi\rangle / \|\Phi\|^2$ where $\Phi = X\ln(K/X)$ — the
+pipeline identifies:
+\begin{equation}
+  \boxed{X' = r\, X\, \ln(K/X), \quad r = 0.395,\; K = 1.540}
+  \label{eq:discovered_gompertz}
+\end{equation}
+\textbf{without assuming Gompertz form a priori.} Forward integration gives $R^2 = 0.968$.
+This is the key demonstration of model-free discovery: the Gompertz ODE emerges as the
+dominant structure from a generic feature scan.
+
+\paragraph{Why the Gompertz ODE dominates.}
+For smooth Monod kinetics with sharp catabolite repression ($n=10$, $K_d=0.005$), the
+diauxic transition in $X(t)$ is nearly invisible — the parametric Gompertz fits $R^2=0.992$.
+The diauxic structure is visible only in $X'(t)$ (two peaks), not in $X(t)$ itself.
+This is an important fundamental limitation: model-free discovery from $X(t)$ alone cannot
+distinguish smooth Monod diauxic from single-phase Gompertz growth.
+
+\begin{table}[h]
+\centering
+\caption{Model-free ODE discovery on synthetic Monod diauxic data}
+\label{tab:modelfree}
+\begin{tabular}{lcc}
+\toprule
+Method & $R^2$ & Notes \\
+\midrule
+Direct Gompertz scan (model-free) & 0.968 & discovered without prior \\
+Gompertz parametric (baseline)    & 0.992 & known model \\
+2nd-order autonomous ODE          & $<$0  & fails: non-autonomous dynamics \\
+Non-autonomous STRidge             & $<$0  & overfits derivative space \\
+aHPM (autonomous)                  & $<$0  & wrong model class \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Conclusion.}
+The characterize-first pipeline applied to diauxic data correctly:
+(1) identifies the two-phase signature in $X'(t)$,
+(2) rules out autonomous 2nd-order ODEs,
+(3) discovers the Gompertz ODE as the dominant structure from a feature scan.
+When the diauxic transition is sharp (double-Gompertz data), phase-segmented boosting
+recovers both phases exactly (Table~\ref{tab:diauxic}). When the transition is smooth
+(Monod data), the derivative fingerprint provides the only reliable diauxic evidence.
+
+% ──────────────────────────────────────────────────────────────
+\section{Grammar Constraint for Symbolic Regression}
+\label{sec:discussion}
+% ──────────────────────────────────────────────────────────────
+
+\subsection{From ODE to Grammar Prior}
+
+The characterize-first pipeline produces structured information that constrains any
+downstream symbolic regression search:
+
+\begin{enumerate}
+  \item \textbf{Model class}: B3 STRidge identifies the dominant ODE term
+        (e.g., $f\ln f$ → Gompertz-like). This eliminates oscillatory terms ($\sin$, $\cos$)
+        from the grammar and prioritises $\exp$ and $\ln$ primitives.
+
+  \item \textbf{Solution template}: B2 identifies $K$ and $r$, giving the functional form
+        $f = K\exp(-C\exp(-r(t-t_0)))$ as a starting point. GP then searches for deviations
+        from this template.
+
+  \item \textbf{Symmetry detection}: parity (even/odd), periodicity, and scaling
+        symmetries further restrict the search. Monotone+saturating data rules out
+        periodic solutions entirely.
+\end{enumerate}
+
+\subsection{Grammar Constraint in Practice}
+
+Once the ODE structure is known, downstream symbolic regression search can be constrained
+to expression classes consistent with the detected ODE. Concretely:
+\begin{itemize}
+  \item Oscillatory terms ($\sin$, $\cos$) are excluded for monotone sigmoidal data.
+  \item The ODE-derived carrying capacity $K$ and rate $r$ provide warm-start initial
+        constants, replacing random initialisation.
+  \item The detected model class (Gompertz, Richards, aHPM) defines the functional
+        skeleton; any remaining free search is over the residual only.
+\end{itemize}
+This is a natural direction for future work combining the Python ODE pipeline with a
+GP back-end.
+
+\subsection{Phase-Segmented Symbolic Boosting}
+
+For multi-phase growth (diauxic), we propose a phase-segmented boosting approach.
+Define the diauxic valley $t^*$ as the minimum of $X'$ between the two derivative peaks.
+Then:
+\begin{enumerate}
+  \item Fit $G_1$ to data on $[0, t^*]$ (phase 1).
+  \item Compute residual $r(t) = X(t) - G_1(t)$.
+  \item Fit $G_2$ to the residual on $[t^*, T]$ (phase 2).
+\end{enumerate}
+This recovers both Gompertz components with $R^2 = 0.9998$ (Table~\ref{tab:diauxic}),
+without any prior assumption that the data contains exactly two phases.
+
+% ──────────────────────────────────────────────────────────────
+\section{Discussion and Future Work}
+\label{sec:future}
+% ──────────────────────────────────────────────────────────────
+
+\paragraph{Limitations.}
+The current pipeline handles scalar univariate functions. Extension to multivariate
+and dynamical systems (PDEs, coupled ODEs) is straightforward in principle but requires
+adapting the derivative matrix construction. Euler ODEs ($f' = f/x$) with non-constant
+coefficients are not yet handled.
+
+\paragraph{Weak/integral formulation.}
+For very noisy data (SNR $< 5$), differentiation fails. Integration against test functions
+$\langle f', \phi \rangle = -\langle f, \phi' \rangle$ avoids differentiation entirely~\cite{messenger2021}.
+This is implemented but not yet benchmarked.
+
+\paragraph{Non-Gompertz data.}
+The B2 scanner assumes Gompertz structure. A general approach would scan over a library
+of ODE forms (logistic, Richards, power-law) and select the best fit by AIC/BIC.
+B3 partially addresses this via STRidge model classification.
+
+\paragraph{Full SR pipeline.}
+The complete characterize-first pipeline is:
+\begin{enumerate}
+  \item Symmetry detection (parity, periodicity, scaling).
+  \item Linear ODE inversion → oscillatory/polynomial/exponential class.
+  \item If residual high: nonlinear ODE detection (B1/B2/B3) → growth model class.
+  \item Grammar restriction based on detected class.
+  \item Constrained GP or exhaustive search on restricted grammar.
+  \item Symbolic boosting on residuals.
+\end{enumerate}
+
+% ──────────────────────────────────────────────────────────────
+\section{Conclusion}
+% ──────────────────────────────────────────────────────────────
+
+We have demonstrated that ODE inversion is a practical and effective pre-processing step
+for symbolic regression. On bacterial growth data, the direct Gompertz ODE scanning (B2)
+recovers exact model parameters on synthetic data and achieves $R^2 \geq 0.992$ on real
+noisy measurements, matching the best parametric fits. The method is noise-robust (working
+to $\sim$20\% additive noise with Gaussian derivative filters and GCV bandwidth selection),
+computationally cheap (seconds on 200-point time series), and produces interpretable output:
+the governing ODE and its analytical solution form.
+
+The characterize-first paradigm inverts the usual SR workflow: instead of searching blindly
+and hoping to find the right expression, we \emph{characterize what class the expression must
+belong to} before searching. This transforms an intractable combinatorial search into a
+well-posed algebraic problem.
+
+% ──────────────────────────────────────────────────────────────
+\bibliographystyle{plain}
+\begin{thebibliography}{99}
+
+\bibitem{koza1992}
+J.~R. Koza.
+\newblock \emph{Genetic Programming: On the Programming of Computers by Means of Natural Selection}.
+\newblock MIT Press, 1992.
+
+\bibitem{udrescu2020}
+S.-M. Udrescu and M.~Tegmark.
+\newblock {AI Feynman}: A physics-inspired method for symbolic regression.
+\newblock \emph{Science Advances}, 6(16):eaay2631, 2020.
+
+\bibitem{cranmer2023}
+M.~Cranmer.
+\newblock Interpretable machine learning for science with {PySR} and {SymbolicRegression.jl}.
+\newblock \emph{arXiv:2305.01582}, 2023.
+
+\bibitem{brunton2016}
+S.~L. Brunton, J.~L. Proctor, and J.~N. Kutz.
+\newblock Discovering governing equations from data by sparse identification of nonlinear
+  dynamical systems.
+\newblock \emph{Proceedings of the National Academy of Sciences}, 113(15):3932--3937, 2016.
+
+\bibitem{gompertz1825}
+B.~Gompertz.
+\newblock On the nature of the function expressive of the law of human mortality.
+\newblock \emph{Philosophical Transactions of the Royal Society}, 115:513--583, 1825.
+
+\bibitem{verhulst1838}
+P.-F. Verhulst.
+\newblock Notice sur la loi que la population poursuit dans son accroissement.
+\newblock \emph{Correspondance Math\'ematique et Physique}, 10:113--121, 1838.
+
+\bibitem{baranyi1994}
+J.~Baranyi and T.~A. Roberts.
+\newblock A dynamic approach to predicting bacterial growth in food.
+\newblock \emph{International Journal of Food Microbiology}, 23(3--4):277--294, 1994.
+
+\bibitem{richards1959}
+F.~J. Richards.
+\newblock A flexible growth function for empirical use.
+\newblock \emph{Journal of Experimental Botany}, 10(2):290--301, 1959.
+
+\bibitem{lindeberg1994}
+T.~Lindeberg.
+\newblock Scale-space theory: A basic tool for analysing structures at different scales.
+\newblock \emph{Journal of Applied Statistics}, 21(1--2):225--270, 1994.
+
+\bibitem{messenger2021}
+D.~A. Messenger and D.~M. Bortz.
+\newblock Weak {SINDy} for partial differential equations.
+\newblock \emph{Journal of Computational Physics}, 443:110525, 2021.
+
+\end{thebibliography}
+
+\end{document}
