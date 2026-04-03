@@ -18,11 +18,13 @@ import Data.IORef
 import qualified Data.Vector      as V
 import Text.Printf
 import Control.Monad              (forM, forM_, when, replicateM)
+import System.Environment         (getArgs)
 import Data.List                  (minimumBy)
 import Data.Ord                   (comparing)
 import System.IO.Unsafe           (unsafePerformIO)
 import Control.Concurrent.Async   (mapConcurrently)
 import Data.Time.Clock            (getCurrentTime, diffUTCTime, NominalDiffTime)
+import System.IO                  (hSetBuffering, stdout, BufferMode(..))
 import Linear.V3                  (V3(..))
 import Linear.Metric              ()
 
@@ -478,5 +480,82 @@ splitOn delim = foldr f [""]
                | otherwise  = (c : x) : xs
     f _ [] = []
 
+-- ============================================================
+-- System (a): 1D Harmonic Oscillator
+-- ============================================================
+
+data HarmonicInput = HarmonicInput
+  { hQ    :: Double
+  , hP    :: Double
+  , hDotQ :: Double
+  , hDotP :: Double
+  } deriving (Show)
+
+harmonicBins :: [TBin]
+harmonicBins =
+  [ TBin "(+)" ((+) :: Double -> Double -> Double)
+  , TBin "(*)" ((*) :: Double -> Double -> Double)
+  , TBin "(-)" ((-) :: Double -> Double -> Double)
+  ]
+
+harmonicUns :: [TUn]
+harmonicUns =
+  [ TUn "sq"        ((\x -> x*x) :: Double -> Double)
+  , TUn "neg"       (negate      :: Double -> Double)
+  , TUn "safeRecip" (safeRecip   :: Double -> Double)
+  ]
+
+harmonicLeaves :: [TLeaf HarmonicInput]
+harmonicLeaves =
+  [ TLeaf "q" hQ
+  , TLeaf "p" hP
+  ]
+
+sympLossHarmonic :: [HarmonicInput] -> PTree HarmonicInput Double -> IO Double
+sympLossHarmonic pts tree = do
+  losses <- forM pts $ \pt -> do
+    dHdq <- partialH tree hQ (\pt' x -> pt' { hQ = x }) 1e-5 pt
+    dHdp <- partialH tree hP (\pt' x -> pt' { hP = x }) 1e-5 pt
+    let eq = hDotQ pt - dHdp
+        ep = hDotP pt + dHdq
+    return (eq*eq + ep*ep)
+  return (sum losses / fromIntegral (length losses))
+
+loadHarmonicCSV :: FilePath -> IO [HarmonicInput]
+loadHarmonicCSV path = do
+  content <- readFile path
+  let ls = lines content
+      dataLines = drop 1 ls  -- skip header
+  return $ map parseLine (filter (not . null) dataLines)
+  where
+    stripCR s = filter (/= '\r') s
+    parseLine l =
+      let [q,p,dq,dp] = map (read . stripCR) (splitOn ',' l)
+      in HarmonicInput q p dq dp
+
+runHarmonic :: IO ()
+runHarmonic = do
+  putStrLn "=== System (a): 1D Harmonic Oscillator ==="
+  pts <- loadHarmonicCSV "data/harmonic.csv"
+  putStrLn $ "Loaded " ++ show (length pts) ++ " data points"
+  let cfg = defaultSearchConfig
+        { scMaxWallSeconds = Just 300
+        , scDepth          = 3
+        , scTargetEnergy   = Just 1e-4
+        , scCheckpointFile = Just "checkpoint_harmonic.csv"
+        }
+      energy tree = sympLossHarmonic pts tree
+  (bestE, bestT, reason) <- parallelTempering harmonicBins harmonicUns harmonicLeaves energy cfg
+  putStrLn $ "Stopped: " ++ reason
+  putStrLn $ "Best energy: " ++ show bestE
+  optTree <- foldConstants bestT
+  simpTree <- simplifyTree optTree
+  putStrLn $ "Best tree (simplified): " ++ show simpTree
+
 main :: IO ()
-main = putStrLn "hamilton: no system selected"
+main = do
+  hSetBuffering stdout LineBuffering
+  args <- getArgs
+  case args of
+    ("harmonic":_) -> runHarmonic
+    _              -> putStrLn "Usage: genetic-algorithm-hamilton harmonic|rigidbody|nbody"
