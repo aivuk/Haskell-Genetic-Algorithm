@@ -623,6 +623,110 @@ runRigidBody = do
   simpTree <- simplifyTree optTree
   putStrLn $ "Best tree (simplified): " ++ show simpTree
 
+-- ============================================================
+-- System (c): Two-Body Gravity
+-- ============================================================
+
+data TwoBodyInput = TwoBodyInput
+  { tbQ1    :: Vec3, tbQ2    :: Vec3   -- positions (tree inputs via components)
+  , tbP1    :: Vec3, tbP2    :: Vec3   -- momenta (tree inputs via components)
+  , tbDotQ1 :: Vec3, tbDotQ2 :: Vec3   -- dq/dt (loss only)
+  , tbDotP1 :: Vec3, tbDotP2 :: Vec3   -- dp/dt (loss only)
+  } deriving (Show)
+
+twoBodyBins :: [TBin]
+twoBodyBins =
+  [ TBin "(+)" ((+) :: Double -> Double -> Double)
+  , TBin "(*)" ((*) :: Double -> Double -> Double)
+  ]
+
+twoBodyUns :: [TUn]
+twoBodyUns =
+  [ TUn "sq"        ((\x -> x*x) :: Double -> Double)
+  , TUn "neg"       (negate      :: Double -> Double)
+  , TUn "safeRecip" (safeRecip   :: Double -> Double)
+  , TUn "safeSqrt"  (safeSqrt    :: Double -> Double)
+  ]
+
+-- 12 scalar leaves: components of q1, q2, p1, p2
+twoBodyLeaves :: [TLeaf TwoBodyInput]
+twoBodyLeaves =
+  [ TLeaf "q1x" (\inp -> let V3 x _ _ = tbQ1 inp in x)
+  , TLeaf "q1y" (\inp -> let V3 _ y _ = tbQ1 inp in y)
+  , TLeaf "q1z" (\inp -> let V3 _ _ z = tbQ1 inp in z)
+  , TLeaf "q2x" (\inp -> let V3 x _ _ = tbQ2 inp in x)
+  , TLeaf "q2y" (\inp -> let V3 _ y _ = tbQ2 inp in y)
+  , TLeaf "q2z" (\inp -> let V3 _ _ z = tbQ2 inp in z)
+  , TLeaf "p1x" (\inp -> let V3 x _ _ = tbP1 inp in x)
+  , TLeaf "p1y" (\inp -> let V3 _ y _ = tbP1 inp in y)
+  , TLeaf "p1z" (\inp -> let V3 _ _ z = tbP1 inp in z)
+  , TLeaf "p2x" (\inp -> let V3 x _ _ = tbP2 inp in x)
+  , TLeaf "p2y" (\inp -> let V3 _ y _ = tbP2 inp in y)
+  , TLeaf "p2z" (\inp -> let V3 _ _ z = tbP2 inp in z)
+  ]
+
+-- Symplectic loss:
+--   L = ||q1_dot - dH/dp1||^2 + ||q2_dot - dH/dp2||^2
+--     + ||p1_dot + dH/dq1||^2 + ||p2_dot + dH/dq2||^2
+sympLossTwoBody :: [TwoBodyInput] -> PTree TwoBodyInput Double -> IO Double
+sympLossTwoBody pts tree = do
+  losses <- forM pts $ \pt -> do
+    dHdp1 <- gradHV3 tree tbP1 (\pt' v -> pt' { tbP1 = v }) 1e-5 pt
+    dHdp2 <- gradHV3 tree tbP2 (\pt' v -> pt' { tbP2 = v }) 1e-5 pt
+    dHdq1 <- gradHV3 tree tbQ1 (\pt' v -> pt' { tbQ1 = v }) 1e-5 pt
+    dHdq2 <- gradHV3 tree tbQ2 (\pt' v -> pt' { tbQ2 = v }) 1e-5 pt
+    let eq1 = tbDotQ1 pt - dHdp1
+        eq2 = tbDotQ2 pt - dHdp2
+        ep1 = tbDotP1 pt + dHdq1
+        ep2 = tbDotP2 pt + dHdq2
+        norm2 (V3 a b c) = a*a + b*b + c*c
+    return (norm2 eq1 + norm2 eq2 + norm2 ep1 + norm2 ep2)
+  return (sum losses / fromIntegral (length losses))
+
+loadTwoBodyCSV :: FilePath -> IO [TwoBodyInput]
+loadTwoBodyCSV path = do
+  content <- readFile path
+  let ls = lines content
+      dataLines = drop 1 ls  -- skip header
+  return $ map parseLine (filter (not . null) dataLines)
+  where
+    stripCR s = filter (/= '\r') s
+    parseLine l =
+      let vs = map (read . stripCR) (splitOn ',' l)
+          [q1x,q1y,q1z,q2x,q2y,q2z,
+           p1x,p1y,p1z,p2x,p2y,p2z,
+           dq1x,dq1y,dq1z,dq2x,dq2y,dq2z,
+           dp1x,dp1y,dp1z,dp2x,dp2y,dp2z] = vs
+      in TwoBodyInput
+           { tbQ1    = V3 q1x q1y q1z
+           , tbQ2    = V3 q2x q2y q2z
+           , tbP1    = V3 p1x p1y p1z
+           , tbP2    = V3 p2x p2y p2z
+           , tbDotQ1 = V3 dq1x dq1y dq1z
+           , tbDotQ2 = V3 dq2x dq2y dq2z
+           , tbDotP1 = V3 dp1x dp1y dp1z
+           , tbDotP2 = V3 dp2x dp2y dp2z
+           }
+
+runTwoBody :: IO ()
+runTwoBody = do
+  putStrLn "=== System (c): Two-Body Gravity ==="
+  pts <- loadTwoBodyCSV "data/twobody.csv"
+  putStrLn $ "Loaded " ++ show (length pts) ++ " data points"
+  let cfg = defaultSearchConfig
+        { scMaxWallSeconds = Just 300
+        , scDepth          = 4
+        , scTargetEnergy   = Just 1e-3
+        , scCheckpointFile = Just "checkpoint_twobody.csv"
+        }
+      energy tree = sympLossTwoBody pts tree
+  (bestE, bestT, reason) <- parallelTempering twoBodyBins twoBodyUns twoBodyLeaves energy cfg
+  putStrLn $ "Stopped: " ++ reason
+  putStrLn $ "Best energy: " ++ show bestE
+  optTree <- foldConstants bestT
+  simpTree <- simplifyTree optTree
+  putStrLn $ "Best tree (simplified): " ++ show simpTree
+
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
@@ -630,4 +734,5 @@ main = do
   case args of
     ("harmonic":_)  -> runHarmonic
     ("rigidbody":_) -> runRigidBody
+    ("nbody":_)     -> runTwoBody
     _               -> putStrLn "Usage: genetic-algorithm-hamilton harmonic|rigidbody|nbody"
