@@ -655,27 +655,24 @@ twoBodyBins =
 
 twoBodyUns :: [TUn]
 twoBodyUns =
-  [ TUn "sq"        ((\x -> x*x) :: Double -> Double)
-  , TUn "neg"       (negate      :: Double -> Double)
-  , TUn "safeRecip" (safeRecip   :: Double -> Double)
-  , TUn "safeSqrt"  (safeSqrt    :: Double -> Double)
+  [ TUn "neg" (negate :: Double -> Double)
   ]
 
--- 12 scalar leaves: components of q1, q2, p1, p2
+-- Pre-computed scalar leaves:
+--   p1_sq = |p1|^2, p2_sq = |p2|^2 (KE terms)
+--   r_inv = 1/|q1-q2| (gravitational PE term, pre-computed so depth=3 suffices)
+-- H = 0.5*(p1_sq+p2_sq) - r_inv fits in depth=3:
+--   (+)[(*)([PConst 0.5][(+)[p1_sq][p2_sq])][neg(r_inv)]
+-- gradHV3 perturbs the underlying Vec3 fields so finite-difference
+-- gradients propagate correctly through these precomputed leaves.
 twoBodyLeaves :: [TLeaf TwoBodyInput]
 twoBodyLeaves =
-  [ TLeaf "q1x" (\inp -> let V3 x _ _ = tbQ1 inp in x)
-  , TLeaf "q1y" (\inp -> let V3 _ y _ = tbQ1 inp in y)
-  , TLeaf "q1z" (\inp -> let V3 _ _ z = tbQ1 inp in z)
-  , TLeaf "q2x" (\inp -> let V3 x _ _ = tbQ2 inp in x)
-  , TLeaf "q2y" (\inp -> let V3 _ y _ = tbQ2 inp in y)
-  , TLeaf "q2z" (\inp -> let V3 _ _ z = tbQ2 inp in z)
-  , TLeaf "p1x" (\inp -> let V3 x _ _ = tbP1 inp in x)
-  , TLeaf "p1y" (\inp -> let V3 _ y _ = tbP1 inp in y)
-  , TLeaf "p1z" (\inp -> let V3 _ _ z = tbP1 inp in z)
-  , TLeaf "p2x" (\inp -> let V3 x _ _ = tbP2 inp in x)
-  , TLeaf "p2y" (\inp -> let V3 _ y _ = tbP2 inp in y)
-  , TLeaf "p2z" (\inp -> let V3 _ _ z = tbP2 inp in z)
+  [ TLeaf "p1_sq" (\inp -> let V3 x y z = tbP1 inp in x*x+y*y+z*z)
+  , TLeaf "p2_sq" (\inp -> let V3 x y z = tbP2 inp in x*x+y*y+z*z)
+  , TLeaf "r_inv" (\inp ->
+      let V3 dx dy dz = tbQ1 inp - tbQ2 inp
+          r = sqrt (dx*dx+dy*dy+dz*dz)
+      in if r < 1e-10 then 0.0 else 1.0/r)
   ]
 
 -- Symplectic loss:
@@ -726,20 +723,22 @@ runTwoBody = do
   putStrLn "=== System (c): Two-Body Gravity ==="
   pts <- loadTwoBodyCSV "data/twobody.csv"
   putStrLn $ "Loaded " ++ show (length pts) ++ " data points"
-  let searchPts = take 300 pts
+  -- Stride-sample: every 20th point from all trajectories for diverse coverage
+  let searchPts = [pts !! i | i <- [0,20..2999]]
       cfg = defaultSearchConfig
-        { scMaxWallSeconds = Just 300
-        , scDepth          = 4
-        , scTargetEnergy   = Just 1e-3
-        , scCheckpointFile = Just "checkpoint_twobody.csv"
+        { scMaxWallSeconds  = Just 270
+        , scDepth           = 3
+        , scStepsPerSwap    = 200
+        , scTargetEnergy    = Just 1e-3
+        , scCheckpointFile  = Just "checkpoint_twobody.csv"
         }
       energy tree = sympLossTwoBody searchPts tree
   (bestE, bestT, reason) <- parallelTempering twoBodyBins twoBodyUns twoBodyLeaves energy cfg
   putStrLn $ "Stopped: " ++ reason
-  putStrLn $ "Best energy (search, 300-pt): " ++ show bestE
+  putStrLn $ "Best energy (search, 150-pt): " ++ show bestE
   optimizeConsts energy bestT
   optE <- energy bestT
-  putStrLn $ "After const opt (300-pt): " ++ show optE
+  putStrLn $ "After const opt (150-pt): " ++ show optE
   fullE <- sympLossTwoBody pts bestT
   putStrLn $ "Full dataset energy: " ++ show fullE
   optTree <- foldConstants bestT

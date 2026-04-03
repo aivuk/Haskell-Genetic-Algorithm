@@ -19,3 +19,13 @@ b,1,7,target,0.25*lx^2+0.25*lz^2 equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary 
 b,1,8,target,c*(lx^2+lz^2) equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
 b,1,9,wall,0.333*lx^2+0.083*ly^2 equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
 b,1,10,target,0.249*(lx^2+lz^2) equiv,SUCCESS,sq_lx/ly/lz leaves + no sq unary + depth3,TRUE
+c,1,1,4.41e-4,0.5*(p1_sq+p2_sq)-r_inv (canonical),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE
+c,1,2,2.43e-4,0.5*(p1_sq+p2_sq)-r_inv (complex),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE
+c,1,3,1.60e-4,0.5*(p1_sq+p2_sq)-r_inv (complex),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE
+c,1,4,8.84e-5,0.5*(p1_sq+p2_sq)-r_inv (complex),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE
+c,1,5,3.63e-5,0.5*(p1_sq+p2_sq)-r_inv (complex),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE
+c,1,6,2.37e-4,0.5*(p1_sq+p2_sq)-r_inv (complex),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE
+c,1,7,3.58e-4,0.5*(p1_sq+p2_sq)-r_inv (complex),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE
+c,1,8,2.56e-4,0.5*(p1_sq+p2_sq)-r_inv (canonical),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE
+c,1,9,8.69e-5,0.5*(p1_sq+p2_sq)-r_inv (complex),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE
+c,1,10,8.30e-4,0.5*(p1_sq+p2_sq)-r_inv (complex),SUCCESS,r_inv leaf + neg-only unary + depth3 + 150-pt stride,TRUE

@@ -24,12 +24,13 @@ for _ in range(50):
     while True:
         q1 = np.random.uniform(-2, 2, 3)
         q2 = np.random.uniform(-2, 2, 3)
-        p1 = np.random.uniform(-1, 1, 3)
-        p2 = -p1  # zero total momentum
+        # Independent momenta (different magnitudes) so |p1| != |p2| generically
+        p1 = np.random.uniform(-0.8, 0.8, 3)
+        p2 = np.random.uniform(-0.8, 0.8, 3)
         r = np.linalg.norm(q2 - q1)
         KE = 0.5 * (np.dot(p1, p1) + np.dot(p2, p2))
         PE = -1.0 / r
-        if KE + PE < 0:
+        if KE + PE < -0.1:  # strictly bound
             break
     for step in range(60):
         # Derivatives (Hamilton's equations)
