@@ -23,6 +23,7 @@ import Data.Ord               (comparing)
 import System.IO.Unsafe       (unsafePerformIO)
 import Control.Concurrent.Async (mapConcurrently)
 import Data.Time.Clock        (getCurrentTime, diffUTCTime, NominalDiffTime)
+import System.IO              (hSetBuffering, stdout, BufferMode(..))
 
 -- linear
 import Linear.V3              (V3(..))
@@ -53,30 +54,75 @@ data PTree a b where
            => String -> (x -> b) -> PTree a x -> PTree a b
     PV     :: String -> (a -> b) -> PTree a b
     PConst :: IORef Double -> PTree a Double
+    PConstV :: Vec3 -> PTree a Vec3
+    PConstQ :: Quat -> PTree a Quat
 
 instance Show (PTree a b) where
     show (PBin n _ l r) = "(" ++ show l ++ " " ++ n ++ " " ++ show r ++ ")"
     show (PUn  n _ u)   = n ++ "(" ++ show u ++ ")"
     show (PV   n _)     = n
     show (PConst ref)   = show (unsafePerformIO (readIORef ref))
+    show (PConstV v)    = showVec v
+    show (PConstQ q)    = showQuat q
+
+showVec :: Vec3 -> String
+showVec (V3 x y z) = "V3(" ++ show x ++ "," ++ show y ++ "," ++ show z ++ ")"
+
+showQuat :: Quat -> String
+showQuat (Quaternion w (V3 x y z)) =
+    "Q(" ++ show w ++ "," ++ show x ++ "," ++ show y ++ "," ++ show z ++ ")"
 
 evalTree :: PTree a b -> a -> IO b
 evalTree (PBin _ f l r) x = f <$> evalTree l x <*> evalTree r x
 evalTree (PUn  _ f u)   x = f <$> evalTree u x
 evalTree (PV   _ f)     x = return (f x)
 evalTree (PConst ref)   _ = readIORef ref
+evalTree (PConstV v)    _ = return v
+evalTree (PConstQ q)    _ = return q
 
 sizeP :: PTree a b -> Int
 sizeP (PBin _ _ l r) = 1 + sizeP l + sizeP r
 sizeP (PUn  _ _ u)   = 1 + sizeP u
 sizeP (PV   _ _)     = 1
 sizeP (PConst _)     = 1
+sizeP (PConstV _)    = 1
+sizeP (PConstQ _)    = 1
 
 collectConsts :: PTree a b -> [IORef Double]
 collectConsts (PBin _ _ l r) = collectConsts l ++ collectConsts r
 collectConsts (PUn  _ _ u)   = collectConsts u
 collectConsts (PV   _ _)     = []
 collectConsts (PConst ref)   = [ref]
+collectConsts (PConstV _)    = []
+collectConsts (PConstQ _)    = []
+
+-- True if the tree uses at least one PV leaf (depends on input).
+hasLeaf :: PTree a b -> Bool
+hasLeaf (PBin _ _ l r) = hasLeaf l || hasLeaf r
+hasLeaf (PUn  _ _ u)   = hasLeaf u
+hasLeaf (PV   _ _)     = True
+hasLeaf _              = False   -- PConst, PConstV, PConstQ
+
+-- Replace constant subtrees (no PV nodes) with a single evaluated constant.
+-- This collapses dead branches like (13.7 scale_v (omega add_v neg_v(omega))).
+foldConstants :: forall a b. Typeable b
+              => PTree a b -> IO (PTree a b)
+foldConstants t
+    | not (hasLeaf t) = do
+        -- Safe: no PV nodes, so any dummy input works
+        let dummy = error "foldConstants: evaluated constant subtree with PV — impossible"
+        v <- evalTree t dummy
+        case eqT @b @Double of
+            Just Refl -> do ref <- newIORef v; return (PConst ref)
+            Nothing   -> case eqT @b @Vec3 of
+                Just Refl -> return (PConstV v)
+                Nothing   -> case eqT @b @Quat of
+                    Just Refl -> return (PConstQ v)
+                    Nothing   -> return t
+    | otherwise = case t of
+        PBin n f l r -> PBin n f <$> foldConstants l <*> foldConstants r
+        PUn  n f u   -> PUn  n f <$> foldConstants u
+        _            -> return t
 
 ------------------------------------------------------------------------
 -- Open function pool types
@@ -237,10 +283,9 @@ mocapBins =
 
 mocapUns :: [TUn]
 mocapUns =
-    [ TUn "exp_q"  (expQ   :: Vec3   -> Quat)
-    , TUn "neg_v"  (negate :: Vec3   -> Vec3)
-    , TUn "norm_v" (norm   :: Vec3   -> Double)
-    , TUn "neg"    (negate :: Double -> Double)
+    [ TUn "exp_q" (expQ   :: Vec3   -> Quat)
+    , TUn "neg_v" (negate :: Vec3   -> Vec3)
+    , TUn "neg"   (negate :: Double -> Double)
     ]
 
 mocapLeaves :: [TLeaf MocapInput]
@@ -334,14 +379,14 @@ data SearchConfig = SearchConfig
 defaultSearchConfig :: SearchConfig
 defaultSearchConfig = SearchConfig
     { scMaxWallSeconds  = Just 3600
-    , scTargetEnergy    = Just 1e-4
+    , scTargetEnergy    = Just 5e-5
     , scMaxRounds       = 5000
     , scStepsPerSwap    = 200
     , scLogEvery        = 10
     , scCheckpointFile  = Just "checkpoint.csv"
-    , scCheckpointEvery = 50
+    , scCheckpointEvery = 10
     , scTemps           = logTemps 12 0.001 10.0
-    , scDepth           = 5
+    , scDepth           = 3
     }
 
 logTemps :: Int -> Double -> Double -> [Double]
@@ -409,12 +454,25 @@ parallelTempering bins uns leaves energy cfg = do
           now <- getCurrentTime
           let elapsed = diffUTCTime now startTime
 
+          vals <- mapM readIORef chains
+          let (bestE, bestT) = minimumBy (comparing fst) vals
+
+          -- Checkpoint and log BEFORE stopping check so we always record
+          -- the state that triggered the stop.
+          when (round `mod` scLogEvery cfg == 0) $
+              printf "[round %d/%d | %s elapsed] best=%.3e\n"
+                  round (scMaxRounds cfg) (formatDiff elapsed) bestE
+
+          when (round `mod` scCheckpointEvery cfg == 0) $
+              case scCheckpointFile cfg of
+                  Just fp -> appendFile fp $
+                      show round ++ "," ++ show bestE ++
+                      ",\"" ++ show bestT ++ "\"\n"
+                  Nothing -> return ()
+
           let timeLimitHit = case scMaxWallSeconds cfg of
                 Just s  -> elapsed >= fromIntegral s
                 Nothing -> False
-
-          vals <- mapM readIORef chains
-          let (bestE, bestT) = minimumBy (comparing fst) vals
 
           let energyTargetHit = case scTargetEnergy cfg of
                 Just tgt -> bestE <= tgt
@@ -446,34 +504,27 @@ parallelTempering bins uns leaves energy cfg = do
                              writeIORef ref1 v2
                              writeIORef ref2 v1
 
-                 when (round `mod` scLogEvery cfg == 0) $ do
-                     vals' <- mapM readIORef chains
-                     let (be, _) = minimumBy (comparing fst) vals'
-                     printf "[round %d/%d | %s elapsed] best=%.6f\n"
-                         round (scMaxRounds cfg) (formatDiff elapsed) be
-
-                 when (round `mod` scCheckpointEvery cfg == 0) $
-                     case scCheckpointFile cfg of
-                         Just fp -> do
-                             vals' <- mapM readIORef chains
-                             let (be, bt) = minimumBy (comparing fst) vals'
-                             appendFile fp $
-                                 show round ++ "," ++ show be ++
-                                 ",\"" ++ show bt ++ "\"\n"
-                         Nothing -> return ()
-
                  loop (round + 1)
 
     loop 1
 
 main :: IO ()
 main = do
+    hSetBuffering stdout LineBuffering
+
     let csvPath = "data/mocap_sample.csv"
     putStrLn $ "Loading " ++ csvPath ++ " ..."
-    pts <- loadMocapCSV csvPath
-    printf "Loaded %d transition rows\n" (V.length pts)
+    allPts <- loadMocapCSV csvPath
 
-    let ef tree = optimizeConsts (energyMocap pts) tree >> energyMocap pts tree
+    -- Subsample for search speed: 300 points captures the structure,
+    -- use all points only for final evaluation.
+    let pts    = V.take 300 allPts
+        allPts' = allPts
+    printf "Loaded %d rows, using %d for search\n" (V.length allPts) (V.length pts)
+
+    -- Raw energy used during search (no constant optimisation per step)
+    -- Constants are only optimised once on the final best tree at the end.
+    let ef  tree = energyMocap pts tree
         cfg = defaultSearchConfig
 
     printf "Starting search: %d chains, max %d rounds, depth %d\n"
@@ -484,9 +535,16 @@ main = do
     (e, best, reason) <- parallelTempering @MocapInput @Quat
                              mocapBins mocapUns mocapLeaves ef cfg
 
+    -- Fine-tune constants on full dataset now that search is done
+    optimizeConsts (energyMocap allPts') best
+    eFinal <- energyMocap allPts' best
+    simplified <- foldConstants best
+
     putStrLn $ "\nStopped: " ++ reason
-    printf "Best energy (1 - |q_hat . q|^2): %.8f\n" e
-    printf "Best tree: %s\n" (show best)
+    printf "Search energy (300 pts):  %.8f\n" e
+    printf "Final energy (all %d pts): %.8f\n" (V.length allPts') eFinal
+    printf "Best tree (raw):        %s\n" (show best)
+    printf "Best tree (simplified): %s\n" (show simplified)
 
     putStrLn "\nSample predictions (first 5 rows):"
     printf "%-12s %-12s %-12s  dq_target_w  dq_found_w\n"

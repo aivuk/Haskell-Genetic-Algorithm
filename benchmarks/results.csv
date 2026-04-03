@@ -1,0 +1,4 @@
+iteration,run,energy_search,energy_full,uses_omega,uses_dt,failure_mode,change_made,tree_simplified
+1,1,8.65e-6,~0,T,T,SUCCESS,baseline depth=5,exp_q(0.4999*dt*omega)
+1,2,1.398e-5,~0,T,T,SUCCESS,baseline depth=5,exp_q(0.4999*dt*omega)
+1,3,2.068e-5,1e-8,T,T,F6(ApproxExtraDt),baseline depth=5,exp_q(0.5077*dt*(1-dt)*omega)
