@@ -23,12 +23,8 @@ import Data.Ord                   (comparing)
 import System.IO.Unsafe           (unsafePerformIO)
 import Control.Concurrent.Async   (mapConcurrently)
 import Data.Time.Clock            (getCurrentTime, diffUTCTime, NominalDiffTime)
-import System.IO                  (hSetBuffering, stdout, BufferMode(..))
-import System.Environment         (getArgs)
-
-import Linear.V3                  (V3(..), cross)
-import Linear.Metric              (dot, norm)
-import Linear.Vector              ((*^))
+import Linear.V3                  (V3(..))
+import Linear.Metric              ()
 
 type Vec3 = V3 Double
 
@@ -238,6 +234,7 @@ mutatePTree tree bins uns leaves maxDepth g = do
     go _ 0 = genPTree @a @c bins uns leaves maxDepth g
     go t@(PV _ _)    _ = return t
     go t@(PConst _)  _ = return t
+    go t@(PConstV _) _ = return t
     go (PUn name f sub) n =
         PUn name f <$> go sub (n - 1)
     go (PBin name f l r) n =
@@ -364,7 +361,7 @@ parallelTempering bins uns leaves energy cfg = do
         Just fp -> writeFile fp "round,energy,tree\n"
         Nothing -> return ()
 
-    let loop round = do
+    let loop roundN = do
           now <- getCurrentTime
           let elapsed = diffUTCTime now startTime
 
@@ -373,14 +370,14 @@ parallelTempering bins uns leaves energy cfg = do
 
           -- Checkpoint and log BEFORE stopping check so we always record
           -- the state that triggered the stop.
-          when (round `mod` scLogEvery cfg == 0) $
+          when (roundN `mod` scLogEvery cfg == 0) $
               printf "[round %d/%d | %s elapsed] best=%.3e\n"
-                  round (scMaxRounds cfg) (formatDiff elapsed) bestE
+                  roundN (scMaxRounds cfg) (formatDiff elapsed) bestE
 
-          when (round `mod` scCheckpointEvery cfg == 0) $
+          when (roundN `mod` scCheckpointEvery cfg == 0) $
               case scCheckpointFile cfg of
                   Just fp -> appendFile fp $
-                      show round ++ "," ++ show bestE ++
+                      show roundN ++ "," ++ show bestE ++
                       ",\"" ++ show bestT ++ "\"\n"
                   Nothing -> return ()
 
@@ -392,7 +389,7 @@ parallelTempering bins uns leaves energy cfg = do
                 Just tgt -> bestE <= tgt
                 Nothing  -> False
 
-          if | round > scMaxRounds cfg ->
+          if | roundN > scMaxRounds cfg ->
                  return (bestE, bestT, "max rounds reached")
              | timeLimitHit ->
                  return (bestE, bestT, "wall time limit reached")
@@ -400,7 +397,7 @@ parallelTempering bins uns leaves energy cfg = do
                  return (bestE, bestT, "target energy reached")
              | otherwise -> do
 
-                 mapConcurrently
+                 _ <- mapConcurrently
                      (\(temp, ref, g') ->
                          forM_ [1 .. scStepsPerSwap cfg :: Int] $ \_ ->
                              mcStep bins uns leaves energy (scDepth cfg) temp ref g')
@@ -418,7 +415,7 @@ parallelTempering bins uns leaves energy cfg = do
                              writeIORef ref1 v2
                              writeIORef ref2 v1
 
-                 loop (round + 1)
+                 loop (roundN + 1)
 
     loop 1
 
