@@ -25,7 +25,7 @@ import System.IO.Unsafe           (unsafePerformIO)
 import Control.Concurrent.Async   (mapConcurrently)
 import Data.Time.Clock            (getCurrentTime, diffUTCTime, NominalDiffTime)
 import System.IO                  (hSetBuffering, stdout, BufferMode(..))
-import Linear.V3                  (V3(..))
+import Linear.V3                  (V3(..), cross)
 import Linear.Metric              ()
 
 type Vec3 = V3 Double
@@ -552,10 +552,82 @@ runHarmonic = do
   simpTree <- simplifyTree optTree
   putStrLn $ "Best tree (simplified): " ++ show simpTree
 
+-- ============================================================
+-- System (b): 3D Rigid Body
+-- ============================================================
+
+data RigidBodyInput = RigidBodyInput
+  { rbL    :: Vec3   -- angular momentum (tree input via components)
+  , rbDotL :: Vec3   -- dL/dt (loss only)
+  } deriving (Show)
+
+rigidBodyBins :: [TBin]
+rigidBodyBins =
+  [ TBin "(+)" ((+) :: Double -> Double -> Double)
+  , TBin "(*)" ((*) :: Double -> Double -> Double)
+  ]
+
+rigidBodyUns :: [TUn]
+rigidBodyUns =
+  [ TUn "sq"        ((\x -> x*x) :: Double -> Double)
+  , TUn "neg"       (negate      :: Double -> Double)
+  , TUn "safeRecip" (safeRecip   :: Double -> Double)
+  ]
+
+rigidBodyLeaves :: [TLeaf RigidBodyInput]
+rigidBodyLeaves =
+  [ TLeaf "lx" (\inp -> let V3 x _ _ = rbL inp in x)
+  , TLeaf "ly" (\inp -> let V3 _ y _ = rbL inp in y)
+  , TLeaf "lz" (\inp -> let V3 _ _ z = rbL inp in z)
+  ]
+
+-- Symplectic loss for rigid body: ||dL/dt - L x grad_L H||^2
+-- grad_L H = (dH/dLx, dH/dLy, dH/dLz) via central differences
+sympLossRigidBody :: [RigidBodyInput] -> PTree RigidBodyInput Double -> IO Double
+sympLossRigidBody pts tree = do
+  losses <- forM pts $ \pt -> do
+    gradH <- gradHV3 tree rbL (\pt' v -> pt' { rbL = v }) 1e-5 pt
+    let crossProd = rbL pt `cross` gradH
+        diff = rbDotL pt - crossProd
+        V3 ex ey ez = diff
+    return (ex*ex + ey*ey + ez*ez)
+  return (sum losses / fromIntegral (length losses))
+
+loadRigidBodyCSV :: FilePath -> IO [RigidBodyInput]
+loadRigidBodyCSV path = do
+  content <- readFile path
+  let ls = lines content
+      dataLines = drop 1 ls
+  return $ map parseLine (filter (not . null) dataLines)
+  where
+    parseLine l =
+      let [lx,ly,lz,dlx,dly,dlz] = map (read . filter (/= '\r')) (splitOn ',' l)
+      in RigidBodyInput (V3 lx ly lz) (V3 dlx dly dlz)
+
+runRigidBody :: IO ()
+runRigidBody = do
+  putStrLn "=== System (b): 3D Rigid Body ==="
+  pts <- loadRigidBodyCSV "data/rigidbody.csv"
+  putStrLn $ "Loaded " ++ show (length pts) ++ " data points"
+  let cfg = defaultSearchConfig
+        { scMaxWallSeconds = Just 300
+        , scDepth          = 3
+        , scTargetEnergy   = Just 1e-4
+        , scCheckpointFile = Just "checkpoint_rigidbody.csv"
+        }
+      energy tree = sympLossRigidBody pts tree
+  (bestE, bestT, reason) <- parallelTempering rigidBodyBins rigidBodyUns rigidBodyLeaves energy cfg
+  putStrLn $ "Stopped: " ++ reason
+  putStrLn $ "Best energy: " ++ show bestE
+  optTree <- foldConstants bestT
+  simpTree <- simplifyTree optTree
+  putStrLn $ "Best tree (simplified): " ++ show simpTree
+
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
   args <- getArgs
   case args of
-    ("harmonic":_) -> runHarmonic
-    _              -> putStrLn "Usage: genetic-algorithm-hamilton harmonic|rigidbody|nbody"
+    ("harmonic":_)  -> runHarmonic
+    ("rigidbody":_) -> runRigidBody
+    _               -> putStrLn "Usage: genetic-algorithm-hamilton harmonic|rigidbody|nbody"
