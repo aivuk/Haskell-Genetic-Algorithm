@@ -1,50 +1,55 @@
-cabal-version:      3.0
-name:               genetic-algorithm
-version:            0.1.0.0
+cabal-version: 3.0
+name:          symbolic-regression
+version:       0.1.0.0
+synopsis:      Typed symbolic regression via parallel-tempering MCMC
+description:
+    A library for discovering mathematical expressions from data using
+    type-safe GADT expression trees and parallel-tempering MCMC search.
+    Includes applications for quaternion integration (mocap) and
+    Hamiltonian mechanics discovery.
 
-executable genetic-algorithm
-    main-is:          main.hs
-    other-modules:    GeneticProgramming
-    build-depends:    base ^>=4.17
-                    , mersenne-random
-                    , vector
-                    , mtl
-                    , array
-    hs-source-dirs:   .
-    default-language: Haskell2010
+------------------------------------------------------------------------
+-- Library
+------------------------------------------------------------------------
 
-executable genetic-algorithm-poly
-    main-is:          main-poly.hs
-    build-depends:    base ^>=4.17
-                    , mersenne-random
-                    , vector
-                    , array
-    hs-source-dirs:   .
+library
+    hs-source-dirs:   src
+    exposed-modules:
+        SymbolicRegression.Tree
+        SymbolicRegression.Mutate
+        SymbolicRegression.Optimize
+        SymbolicRegression.Search
+    build-depends:
+        base              ^>=4.17
+      , mersenne-random
+      , array
+      , linear
+      , async
+      , time
     default-language: Haskell2010
-    ghc-options:      -XTypeApplications
+    ghc-options:      -Wall -O2
 
-executable genetic-algorithm-mocap
-    main-is:          main-mocap.hs
-    build-depends:    base ^>=4.17
-                    , mersenne-random
-                    , vector
-                    , array
-                    , linear
-                    , async
-                    , time
-    hs-source-dirs:   .
-    default-language: Haskell2010
-    ghc-options:      -XTypeApplications -O2 -threaded -rtsopts
+------------------------------------------------------------------------
+-- Executables
+------------------------------------------------------------------------
 
-executable genetic-algorithm-hamilton
-    main-is:          main-hamilton.hs
-    build-depends:    base ^>=4.17
-                    , mersenne-random
-                    , vector
-                    , array
-                    , linear
-                    , async
-                    , time
-    hs-source-dirs:   .
+executable symbolic-regression-mocap
+    main-is:          Main.hs
+    hs-source-dirs:   app/mocap
+    build-depends:
+        base              ^>=4.17
+      , symbolic-regression
+      , vector
+      , linear
     default-language: Haskell2010
-    ghc-options:      -XTypeApplications -O2 -threaded -rtsopts
+    ghc-options:      -Wall -O2 -threaded -rtsopts -with-rtsopts=-N
+
+executable symbolic-regression-hamilton
+    main-is:          Main.hs
+    hs-source-dirs:   app/hamilton
+    build-depends:
+        base              ^>=4.17
+      , symbolic-regression
+      , linear
+    default-language: Haskell2010
+    ghc-options:      -Wall -O2 -threaded -rtsopts -with-rtsopts=-N
