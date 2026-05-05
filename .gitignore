@@ -2,3 +2,4 @@ data/mocap_sample.csv
 data/*.bvh
 article/
 ode_inversion/
+dist-newstyle/
