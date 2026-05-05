@@ -3,3 +3,5 @@ data/*.bvh
 article/
 ode_inversion/
 dist-newstyle/
+*_LOG.md
+*_PROMPT.md
